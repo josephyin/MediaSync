@@ -1,4 +1,5 @@
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -7,7 +8,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.base import utcnow
 from app.models.task import TERMINAL_TASK_RUN_STATUSES, Task, TaskRun
-from app.repositories.task_runs import TaskRunRepository
 from app.task_engine.transitions import TERMINAL_TASK_STATUSES, validate_transition
 
 CLAIMABLE_TASK_STATUSES = ("pending", "retry")
@@ -65,9 +65,14 @@ class TaskClaim:
 class TaskRepository:
     """The v2 persistence entrypoint for Task and Task Run state changes."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        clock: Callable[[], datetime] = utcnow,
+    ) -> None:
         self._session = session
-        self._runs = TaskRunRepository(session)
+        self._clock = clock
 
     def create_task(self, task: Task) -> Task:
         if task.status is None:
@@ -110,7 +115,7 @@ class TaskRepository:
                 f"task transition {expected_status!r} -> {target_status!r} "
                 "requires an ownership-aware repository operation"
             )
-        now = occurred_at or utcnow()
+        now = occurred_at or self._clock()
         transition_values = self._task_transition_values(
             target_status=target_status,
             occurred_at=now,
@@ -144,7 +149,7 @@ class TaskRepository:
         claimed_at: datetime | None = None,
     ) -> TaskClaim | None:
         self._validate_owner_arguments(worker_id, lease_duration)
-        now = claimed_at or utcnow()
+        now = claimed_at or self._clock()
         lease_until = now + lease_duration
         lock_token = secrets.token_hex(32)
         candidate_id = (
@@ -237,14 +242,14 @@ class TaskRepository:
             )
             or 0
         ) + 1
-        return self._runs.append(
+        return self._append_task_run(
             TaskRun(
                 task_id=task_id,
                 run_number=next_run_number,
                 worker_id=worker_id,
                 lock_token=lock_token,
                 status="running",
-                started_at=started_at or utcnow(),
+                started_at=started_at or self._clock(),
                 last_heartbeat_at=last_heartbeat_at,
             )
         )
@@ -261,7 +266,7 @@ class TaskRepository:
         self._validate_owner_arguments(worker_id, lease_duration)
         if not lock_token:
             raise ValueError("lock_token must not be empty")
-        now = heartbeat_at or utcnow()
+        now = heartbeat_at or self._clock()
         lease_until = now + lease_duration
 
         with self._session.begin_nested():
@@ -331,10 +336,11 @@ class TaskRepository:
                 f"task status {task_status!r} requires run status {expected_run_status!r}"
             )
 
-        now = finished_at or utcnow()
+        ownership_checked_at = self._clock()
+        outcome_at = finished_at or ownership_checked_at
         task_values = self._task_transition_values(
             target_status=task_status,
-            occurred_at=now,
+            occurred_at=outcome_at,
             blocked_reason=blocked_reason,
             error_code=error_code,
             error_message=error_message,
@@ -346,17 +352,17 @@ class TaskRepository:
                 "lock_token": None,
                 "locked_at": None,
                 "lease_until": None,
-                "updated_at": now,
+                "updated_at": ownership_checked_at,
             }
         )
         run_values: dict[str, object] = {
             "status": run_status,
-            "finished_at": now,
+            "finished_at": outcome_at,
             "duration_ms": duration_ms,
             "result_summary": result_summary,
             "error_code": error_code,
             "error_message": error_message,
-            "updated_at": now,
+            "updated_at": ownership_checked_at,
         }
         if metrics is not None:
             run_values["metrics"] = metrics
@@ -369,7 +375,7 @@ class TaskRepository:
                     Task.status == expected_task_status,
                     Task.locked_by == worker_id,
                     Task.lock_token == lock_token,
-                    Task.lease_until > now,
+                    Task.lease_until > ownership_checked_at,
                 )
                 .values(**task_values)
                 .returning(Task.id)
@@ -427,9 +433,16 @@ class TaskRepository:
                 .execution_options(populate_existing=True)
             )
         else:
-            task_run = self._runs.get(task_run_id)
+            task_run = self._session.get(TaskRun, task_run_id)
         if task_run is None:
             raise TaskRunNotFoundError(f"task run {task_run_id} not found")
+        return task_run
+
+    def _append_task_run(self, task_run: TaskRun) -> TaskRun:
+        if task_run.status != "running":
+            raise ValueError("a new task run must start in running state")
+        self._session.add(task_run)
+        self._session.flush()
         return task_run
 
     @staticmethod

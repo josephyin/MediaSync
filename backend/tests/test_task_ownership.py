@@ -21,6 +21,10 @@ NOW_SQLITE = NOW.replace(tzinfo=None)
 LEASE = timedelta(seconds=90)
 
 
+def repository(db: Session, *, clock: datetime = NOW) -> TaskRepository:
+    return TaskRepository(db, clock=lambda: clock)
+
+
 @pytest.fixture
 def db() -> Iterator[Session]:
     engine = create_engine("sqlite:///:memory:")
@@ -31,10 +35,10 @@ def db() -> Iterator[Session]:
 
 
 def test_claim_assigns_complete_ownership_and_creates_run(db: Session) -> None:
-    repository = TaskRepository(db)
-    task = repository.create_task(Task(type="scan"))
+    task_repository = repository(db)
+    task = task_repository.create_task(Task(type="scan"))
 
-    claim = repository.claim_next(
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -79,7 +83,7 @@ def test_claim_uses_priority_availability_and_stable_ordering(db: Session) -> No
     db.add_all(tasks)
     db.commit()
 
-    claim = TaskRepository(db).claim_next(
+    claim = repository(db).claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -98,7 +102,7 @@ def test_claim_skips_retry_that_is_not_due(db: Session) -> None:
     db.add(task)
     db.commit()
 
-    claim = TaskRepository(db).claim_next(
+    claim = repository(db).claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -112,17 +116,17 @@ def test_claim_and_run_creation_roll_back_together(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repository = TaskRepository(db)
-    task = repository.create_task(Task(type="scan"))
+    task_repository = repository(db)
+    task = task_repository.create_task(Task(type="scan"))
     db.commit()
 
     def fail_run_creation(_task_run: TaskRun) -> TaskRun:
         raise RuntimeError("injected task run failure")
 
-    monkeypatch.setattr(repository._runs, "append", fail_run_creation)
+    monkeypatch.setattr(task_repository, "_append_task_run", fail_run_creation)
 
     with pytest.raises(RuntimeError, match="injected"):
-        repository.claim_next(
+        task_repository.claim_next(
             worker_id="worker-a",
             lease_duration=LEASE,
             claimed_at=NOW,
@@ -140,16 +144,16 @@ def test_claim_and_run_creation_roll_back_together(
 
 
 def test_sequential_attempts_use_fresh_tokens_and_run_numbers(db: Session) -> None:
-    repository = TaskRepository(db)
-    task = repository.create_task(Task(type="transfer"))
-    first = repository.claim_next(
+    task_repository = repository(db)
+    task = task_repository.create_task(Task(type="transfer"))
+    first = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
     )
     assert first is not None
     retry_at = NOW + timedelta(seconds=20)
-    repository.finish_run(
+    task_repository.finish_run(
         task.id,
         first.task_run.id,
         worker_id="worker-a",
@@ -161,7 +165,7 @@ def test_sequential_attempts_use_fresh_tokens_and_run_numbers(db: Session) -> No
         next_attempt_at=retry_at,
     )
 
-    second = repository.claim_next(
+    second = task_repository.claim_next(
         worker_id="worker-b",
         lease_duration=LEASE,
         claimed_at=retry_at,
@@ -174,9 +178,9 @@ def test_sequential_attempts_use_fresh_tokens_and_run_numbers(db: Session) -> No
 
 
 def test_heartbeat_extends_current_lease_and_updates_run(db: Session) -> None:
-    repository = TaskRepository(db)
-    repository.create_task(Task(type="scan"))
-    claim = repository.claim_next(
+    task_repository = repository(db)
+    task_repository.create_task(Task(type="scan"))
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -184,7 +188,7 @@ def test_heartbeat_extends_current_lease_and_updates_run(db: Session) -> None:
     assert claim is not None
     heartbeat_at = NOW + timedelta(seconds=30)
 
-    task, task_run = repository.heartbeat(
+    task, task_run = task_repository.heartbeat(
         claim.task.id,
         worker_id="worker-a",
         lock_token=claim.lock_token,
@@ -197,9 +201,9 @@ def test_heartbeat_extends_current_lease_and_updates_run(db: Session) -> None:
 
 
 def test_stale_or_expired_owner_cannot_heartbeat(db: Session) -> None:
-    repository = TaskRepository(db)
-    repository.create_task(Task(type="scan"))
-    claim = repository.claim_next(
+    task_repository = repository(db)
+    task_repository.create_task(Task(type="scan"))
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -207,7 +211,7 @@ def test_stale_or_expired_owner_cannot_heartbeat(db: Session) -> None:
     assert claim is not None
 
     with pytest.raises(TaskOwnershipLostError):
-        repository.heartbeat(
+        task_repository.heartbeat(
             claim.task.id,
             worker_id="worker-a",
             lock_token="stale-token",
@@ -215,7 +219,7 @@ def test_stale_or_expired_owner_cannot_heartbeat(db: Session) -> None:
             heartbeat_at=NOW + timedelta(seconds=10),
         )
     with pytest.raises(TaskOwnershipLostError):
-        repository.heartbeat(
+        task_repository.heartbeat(
             claim.task.id,
             worker_id="worker-a",
             lock_token=claim.lock_token,
@@ -230,9 +234,9 @@ def test_stale_or_expired_owner_cannot_heartbeat(db: Session) -> None:
 
 
 def test_fenced_finish_clears_ownership_and_terminalizes_run(db: Session) -> None:
-    repository = TaskRepository(db)
-    repository.create_task(Task(type="scan"))
-    claim = repository.claim_next(
+    task_repository = repository(db)
+    task_repository.create_task(Task(type="scan"))
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -240,7 +244,7 @@ def test_fenced_finish_clears_ownership_and_terminalizes_run(db: Session) -> Non
     assert claim is not None
     finished_at = NOW + timedelta(seconds=10)
 
-    task, task_run = repository.finish_run(
+    task, task_run = task_repository.finish_run(
         claim.task.id,
         claim.task_run.id,
         worker_id="worker-a",
@@ -262,9 +266,9 @@ def test_fenced_finish_clears_ownership_and_terminalizes_run(db: Session) -> Non
 
 
 def test_stale_owner_cannot_finish_or_mutate_owned_state(db: Session) -> None:
-    repository = TaskRepository(db)
-    repository.create_task(Task(type="transfer"))
-    claim = repository.claim_next(
+    task_repository = repository(db)
+    task_repository.create_task(Task(type="transfer"))
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -272,7 +276,7 @@ def test_stale_owner_cannot_finish_or_mutate_owned_state(db: Session) -> None:
     assert claim is not None
 
     with pytest.raises(TaskOwnershipLostError):
-        repository.finish_run(
+        task_repository.finish_run(
             claim.task.id,
             claim.task_run.id,
             worker_id="worker-a",
@@ -294,9 +298,9 @@ def test_stale_owner_cannot_finish_or_mutate_owned_state(db: Session) -> None:
 
 
 def test_expired_owner_cannot_finish(db: Session) -> None:
-    repository = TaskRepository(db)
-    repository.create_task(Task(type="transfer"))
-    claim = repository.claim_next(
+    task_repository = repository(db)
+    task_repository.create_task(Task(type="transfer"))
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -304,7 +308,7 @@ def test_expired_owner_cannot_finish(db: Session) -> None:
     assert claim is not None
 
     with pytest.raises(TaskOwnershipLostError):
-        repository.finish_run(
+        repository(db, clock=NOW + LEASE).finish_run(
             claim.task.id,
             claim.task_run.id,
             worker_id="worker-a",
@@ -312,7 +316,7 @@ def test_expired_owner_cannot_finish(db: Session) -> None:
             expected_task_status="running",
             task_status="success",
             run_status="success",
-            finished_at=NOW + LEASE,
+            finished_at=NOW + timedelta(seconds=10),
         )
 
     db.expire_all()
@@ -325,9 +329,9 @@ def test_expired_owner_cannot_finish(db: Session) -> None:
 
 
 def test_cancel_request_preserves_ownership_until_fenced_finish(db: Session) -> None:
-    repository = TaskRepository(db)
-    repository.create_task(Task(type="transfer"))
-    claim = repository.claim_next(
+    task_repository = repository(db)
+    task_repository.create_task(Task(type="transfer"))
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -335,7 +339,7 @@ def test_cancel_request_preserves_ownership_until_fenced_finish(db: Session) -> 
     assert claim is not None
     requested_at = NOW + timedelta(seconds=10)
 
-    requested = repository.transition(
+    requested = task_repository.transition(
         claim.task.id,
         expected_status="running",
         target_status="cancel_requested",
@@ -344,7 +348,7 @@ def test_cancel_request_preserves_ownership_until_fenced_finish(db: Session) -> 
     assert requested.lock_token == claim.lock_token
     assert requested.cancel_requested_at == requested_at.replace(tzinfo=None)
 
-    task, task_run = repository.finish_run(
+    task, task_run = task_repository.finish_run(
         claim.task.id,
         claim.task_run.id,
         worker_id="worker-a",
@@ -361,9 +365,9 @@ def test_cancel_request_preserves_ownership_until_fenced_finish(db: Session) -> 
 
 
 def test_missing_run_rolls_back_fenced_task_finish(db: Session) -> None:
-    repository = TaskRepository(db)
-    repository.create_task(Task(type="scan"))
-    claim = repository.claim_next(
+    task_repository = repository(db)
+    task_repository.create_task(Task(type="scan"))
+    claim = task_repository.claim_next(
         worker_id="worker-a",
         lease_duration=LEASE,
         claimed_at=NOW,
@@ -371,7 +375,7 @@ def test_missing_run_rolls_back_fenced_task_finish(db: Session) -> None:
     assert claim is not None
 
     with pytest.raises(TaskRunNotFoundError):
-        repository.finish_run(
+        task_repository.finish_run(
             claim.task.id,
             claim.task_run.id + 100,
             worker_id="worker-a",
@@ -390,11 +394,11 @@ def test_missing_run_rolls_back_fenced_task_finish(db: Session) -> None:
 
 
 def test_transition_cannot_bypass_claim_ownership(db: Session) -> None:
-    repository = TaskRepository(db)
-    task = repository.create_task(Task(type="scan"))
+    task_repository = repository(db)
+    task = task_repository.create_task(Task(type="scan"))
 
     with pytest.raises(TaskOwnershipRequiredError):
-        repository.transition(
+        task_repository.transition(
             task.id,
             expected_status="pending",
             target_status="running",
@@ -418,7 +422,7 @@ def test_competing_sqlite_claims_do_not_acquire_same_task(tmp_path: Path) -> Non
     def attempt(worker_id: str) -> str | None:
         with Session(engine) as session, session.begin():
             barrier.wait()
-            claim = TaskRepository(session).claim_next(
+            claim = repository(session).claim_next(
                 worker_id=worker_id,
                 lease_duration=LEASE,
                 claimed_at=NOW,
@@ -448,7 +452,7 @@ def test_claim_rejects_non_positive_lease(
     lease_duration: timedelta,
 ) -> None:
     with pytest.raises(ValueError, match="positive"):
-        TaskRepository(db).claim_next(
+        repository(db).claim_next(
             worker_id="worker-a",
             lease_duration=lease_duration,
             claimed_at=NOW,
