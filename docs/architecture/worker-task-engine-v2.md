@@ -11,8 +11,14 @@ MediaSync v0.2 will separate the API, scheduler, and worker into independent
 processes while continuing to use SQLite and a single worker by default.
 
 The API and scheduler may enqueue tasks, but only the worker may execute tasks
-or perform execution-state transitions. Task queue state will remain in
-`tasks`; every execution attempt will be recorded in `task_runs`.
+or complete execution-state transitions. The API may invoke the Task Engine's
+cooperative cancellation command, but it never executes or finalizes a running
+task. Task queue state will remain in `tasks`; every execution attempt will be
+recorded in `task_runs`.
+
+The SQLite deployment profile supports exactly one worker process and task
+concurrency `1`. Multiple worker processes are deferred until a PostgreSQL
+deployment profile is designed and verified.
 
 The default deployment will deliberately avoid Redis, RabbitMQ, Celery, and
 Kubernetes. A future PostgreSQL backend may support multiple workers, but that
@@ -107,6 +113,7 @@ It MAY:
 - Query tasks and task runs.
 - Enqueue a manual scan task.
 - Enqueue a user-requested retry.
+- Request cancellation through a Task Engine command.
 - Return dashboard and health information.
 
 It MUST NOT:
@@ -180,8 +187,10 @@ It MUST:
 - Recover expired leases.
 - Publish its service heartbeat.
 
-The default v0.2 deployment runs one worker process with controlled local
-concurrency. Initial production configuration SHOULD use concurrency `1`.
+The default v0.2 SQLite deployment MUST run exactly one worker process with
+task concurrency `1`. Starting additional worker instances against the same
+SQLite database is unsupported, even though the claim protocol is designed to
+prevent duplicate ownership.
 
 ### 2.4 Shared domain code
 
@@ -213,9 +222,10 @@ lowercase strings.
 | `PENDING` | Ready to be claimed immediately. |
 | `RUNNING` | Owned by a worker with a valid lease. |
 | `RETRY` | Waiting until `next_attempt_at` after a retryable failure. |
+| `CANCEL_REQUESTED` | Cooperative cancellation or reconciliation is pending. |
 | `SUCCESS` | Completed successfully. |
 | `FAILED` | Terminal failure or retry budget exhausted. |
-| `CANCELLED` | Explicitly cancelled before completion. |
+| `CANCELLED` | Cancellation completed without claiming an unverified side effect as success. |
 
 ### 3.2 State transitions
 
@@ -229,8 +239,12 @@ stateDiagram-v2
     RUNNING --> FAILED: terminal error or retry limit
     PENDING --> CANCELLED: cancel before claim
     RETRY --> CANCELLED: cancel before retry
+    RUNNING --> CANCEL_REQUESTED: cancellation requested
+    CANCEL_REQUESTED --> CANCELLED: worker stops at a safe point
+    CANCEL_REQUESTED --> SUCCESS: irreversible work already completed
     RUNNING --> RETRY: lease expired and retries remain
     RUNNING --> FAILED: lease expired and retry limit reached
+    CANCEL_REQUESTED --> CANCEL_REQUESTED: lease expired and reclaimed
     SUCCESS --> [*]
     FAILED --> [*]
     CANCELLED --> [*]
@@ -243,16 +257,41 @@ Terminal states MUST NOT transition back to a runnable state. A user retry
 creates a new business task or an explicitly linked successor task; it does
 not erase the old task or its runs.
 
-### 3.3 State ownership
+### 3.3 Cancellation semantics
+
+Cancellation is cooperative:
+
+- A `PENDING` or `RETRY` task may move directly to `CANCELLED` because it has
+  no active executor.
+- A `RUNNING` task MUST move to `CANCEL_REQUESTED`; it MUST NOT move directly
+  to `CANCELLED`.
+- The owning worker continues heartbeat while the task is
+  `CANCEL_REQUESTED` and checks for cancellation at safe boundaries.
+- Provider HTTP calls are not forcibly terminated. The worker reconciles their
+  result before choosing a terminal state.
+- If an irreversible Provider operation already succeeded, the worker MUST
+  persist the real outcome and may finish as `SUCCESS`; it MUST NOT report a
+  successful transfer as cancelled.
+- If the lease expires while cancellation is requested, recovery marks the
+  run `lost` and makes the task reclaimable in `CANCEL_REQUESTED`. A new owner
+  reconciles any unknown Provider outcome before finalizing it.
+
+Cancellation does not guarantee rollback of a remote cloud-drive operation.
+The API and UI must communicate this limitation.
+
+### 3.4 State ownership
 
 | Transition | Owner |
 |---|---|
 | Create `PENDING` task | API, scheduler, or worker executor |
 | `PENDING/RETRY → RUNNING` | Worker claim operation |
-| Extend `RUNNING` lease | Owning worker |
+| Extend `RUNNING/CANCEL_REQUESTED` lease | Owning worker |
 | `RUNNING → SUCCESS/RETRY/FAILED` | Owning worker |
 | Recover expired `RUNNING` | Worker recovery loop |
 | `PENDING/RETRY → CANCELLED` | Task Engine command |
+| `RUNNING → CANCEL_REQUESTED` | Task Engine command |
+| `CANCEL_REQUESTED → SUCCESS/CANCELLED` | Owning worker |
+| Recover expired `CANCEL_REQUESTED` | Worker recovery loop |
 
 All transitions MUST go through the Task Engine repository. Services and API
 routers MUST NOT assign task status strings directly.
@@ -282,7 +321,10 @@ task using one statement and one short transaction:
 ```sql
 UPDATE tasks
 SET
-    status = 'running',
+    status = CASE
+        WHEN status = 'cancel_requested' THEN 'cancel_requested'
+        ELSE 'running'
+    END,
     locked_by = :worker_id,
     lock_token = :lock_token,
     locked_at = :now,
@@ -291,12 +333,18 @@ SET
 WHERE id = (
     SELECT id
     FROM tasks
-    WHERE status IN ('pending', 'retry')
-      AND (next_attempt_at IS NULL OR next_attempt_at <= :now)
+    WHERE (
+        status IN ('pending', 'retry')
+        AND (next_attempt_at IS NULL OR next_attempt_at <= :now)
+      )
+       OR (
+        status = 'cancel_requested'
+        AND locked_by IS NULL
+      )
     ORDER BY priority DESC, created_at ASC
     LIMIT 1
 )
-  AND status IN ('pending', 'retry')
+  AND status IN ('pending', 'retry', 'cancel_requested')
 RETURNING *;
 ```
 
@@ -323,7 +371,7 @@ completion updates MUST match:
 
 ```sql
 WHERE id = :task_id
-  AND status = 'running'
+  AND status IN ('running', 'cancel_requested')
   AND locked_by = :worker_id
   AND lock_token = :lock_token
 ```
@@ -361,7 +409,7 @@ SET
     lease_until = :new_lease_until,
     updated_at = :now
 WHERE id = :task_id
-  AND status = 'running'
+  AND status IN ('running', 'cancel_requested')
   AND locked_by = :worker_id
   AND lock_token = :lock_token;
 ```
@@ -378,7 +426,7 @@ at the next safe cancellation point.
 The worker recovery loop searches for:
 
 ```text
-status = RUNNING
+status in (RUNNING, CANCEL_REQUESTED)
 and lease_until < now
 ```
 
@@ -388,7 +436,8 @@ For each expired task, it atomically:
 2. Stores a reason such as `WORKER_LEASE_EXPIRED`.
 3. Increments the task retry counter.
 4. Clears `locked_by`, `lock_token`, `locked_at`, and `lease_until`.
-5. Moves the task to:
+5. Moves or leaves the task in:
+   - reclaimable `CANCEL_REQUESTED` when cancellation was requested;
    - `PENDING` when immediate recovery is allowed;
    - `RETRY` when backoff is required;
    - `FAILED` when the retry budget is exhausted.
@@ -427,11 +476,13 @@ Proposed fields:
 | `priority` | Higher value claims first. |
 | `subscription_id` | Related subscription, when applicable. |
 | `file_id` | Related indexed file, when applicable. |
-| `payload` | Versioned JSON for task-specific immutable input. |
+| `payload_version` | Explicit parser version for the task payload. |
+| `payload` | Task-specific immutable JSON input. |
 | `idempotency_key` | Unique business-operation key. |
 | `retry_count` | Completed unsuccessful attempts. |
 | `max_retries` | Retry budget. |
 | `next_attempt_at` | Earliest retry time. |
+| `cancel_requested_at` | Time cooperative cancellation was requested. |
 | `locked_by` | Current worker instance. |
 | `lock_token` | Fencing token for the current claim. |
 | `locked_at` | Claim timestamp. |
@@ -510,6 +561,64 @@ practical. For example, a successful transfer transaction should update:
 The terminal update MUST include the ownership fencing conditions. If the
 worker no longer owns the task, it MUST not mark the file or task successful.
 
+### 6.4 Payload versioning
+
+Every task MUST persist an explicit `payload_version` alongside its immutable
+JSON payload:
+
+```json
+{
+  "payload_version": 1,
+  "payload": {
+    "file_id": 123
+  }
+}
+```
+
+Task type and payload version select a specific Pydantic parser. Workers MUST
+not infer a payload version from whichever fields happen to be present.
+
+Compatibility rules:
+
+- A task's payload and version MUST NOT change after enqueue.
+- A deployment MUST retain parsers required by its non-terminal tasks.
+- Unknown versions fail with `UNSUPPORTED_TASK_PAYLOAD_VERSION`; they must not
+  be guessed, silently upgraded, or sent to a Provider.
+- A migration that changes payload shape either retains the old parser or
+  explicitly migrates queued payloads before the old parser is removed.
+- New task producers begin writing a new version only after deployed workers
+  can read it.
+
+### 6.5 Event timeline extension point
+
+`task_runs` stores attempt summaries, not every lifecycle event. The Task
+Engine MUST expose an event-sink boundary so a durable `task_events` timeline
+can be added without changing executors.
+
+Reserved event names include:
+
+```text
+task.created
+task.claimed
+task.cancel_requested
+scan.started
+file.discovered
+transfer.started
+transfer.succeeded
+task.retry_scheduled
+task.failed
+task.cancelled
+```
+
+Each event envelope should contain `task_id`, optional `task_run_id`, event
+name, timestamp, sequence, and sanitized versioned JSON data. Credentials and
+raw Provider responses MUST NOT appear in event data.
+
+Persisting a complete `task_events` table and building its UI are not required
+for the first Task Engine implementation. v0.2 should emit the same canonical
+event names to structured logs; a later migration may persist them for a
+user-facing timeline.
+
 ## 7. Execution model
 
 ### 7.1 Scan execution
@@ -528,7 +637,7 @@ Transfer task keys SHOULD continue to include the source file identity and
 fingerprint:
 
 ```text
-transfer:{subscription_id}:{remote_file_id}:{fingerprint}
+transfer:{subscription_id}:{remote_file_id}:{target_account_id}:{target_folder_id}:{fingerprint}
 ```
 
 ### 7.2 Transfer execution
@@ -554,11 +663,53 @@ directly:
 Success(result, metrics)
 RetryableFailure(code, message, retry_after)
 TerminalFailure(code, message)
+Cancelled(result, metrics)
 OwnershipLost
 ```
 
 Provider exceptions must be mapped into these outcomes. Raw provider responses,
 tokens, cookies, and credentials MUST NOT be stored in task or run messages.
+
+### 7.4 Idempotency and the remote side-effect boundary
+
+SQLite and a cloud Provider cannot participate in one atomic transaction.
+Therefore, the Task Engine guarantees at-least-once execution and must build
+effectively-once transfer behavior through idempotency and reconciliation. It
+does not claim impossible exactly-once delivery.
+
+The transfer idempotency key MUST identify the complete business operation:
+
+```text
+subscription_id
++ remote_file_id
++ source fingerprint or revision
++ target_account_id
++ target_folder_id
+```
+
+The unique task key prevents duplicate queue intent, but is not by itself
+enough to prevent duplicate remote copies. A transfer executor MUST:
+
+1. Check its durable file/transfer record before issuing a Provider operation.
+2. Reconcile the target when a previous attempt may have crossed the remote
+   success/local commit boundary.
+3. Pass a client idempotency key when the Provider supports one.
+4. Persist the destination file ID or another stable remote receipt after
+   success.
+5. Mark the task `SUCCESS` only after the durable domain record is committed.
+
+If `copy_file()` succeeds but the SQLite commit fails, the next attempt MUST
+reconcile before copying again. Provider SDK v2 must expose an
+`ensure_transfer` or equivalent capability that can distinguish:
+
+```text
+already completed
+safe to execute
+outcome unknown and reconciliation required
+```
+
+Filename-only existence checks are insufficient when two different source
+files may legitimately share a name.
 
 ## 8. Provider refactor order
 
@@ -607,6 +758,10 @@ SQLite WAL
 Requirements:
 
 - All processes mount the same local data volume.
+- Exactly one `mediasync-worker` process may connect to a given SQLite
+  database, and its task concurrency MUST be `1`.
+- Docker Compose MUST declare one worker replica. Operators MUST NOT scale the
+  SQLite worker service horizontally.
 - SQLite storage MUST be on a filesystem with reliable locking.
 - Network filesystems are not supported unless explicitly validated.
 - Transactions around queue operations MUST be short.
@@ -624,6 +779,9 @@ PostgreSQL
 ```
 
 PostgreSQL and multiple workers are not v0.2 acceptance requirements.
+Multiple workers become a supported configuration only after a PostgreSQL
+profile has database-specific claim tests, lease tests, and deployment
+documentation.
 
 ## 10. Failure behavior
 
@@ -640,6 +798,8 @@ PostgreSQL and multiple workers are not v0.2 acceptance requirements.
 | Database busy | Retry short queue transactions with bounded backoff. |
 | Duplicate scheduler tick | Unique task key prevents duplicate scan intent. |
 | Duplicate file discovery | Unique transfer key prevents duplicate transfer intent. |
+| Remote copy succeeds, local commit fails | Retry reconciles the destination before another copy. |
+| Cancel requested during Provider call | Worker keeps its lease and reconciles the call before finalizing. |
 | Stale worker resumes | `lock_token` fencing prevents stale completion. |
 
 ## 11. Observability and health contract
@@ -672,15 +832,22 @@ a substitute for application logs.
 
 The migration must be additive and recoverable:
 
-1. Add claim, lease, retry, priority, and completion fields to `tasks`.
+1. Add claim, lease, retry, priority, cancellation, `payload_version`, and
+   completion fields to `tasks`.
 2. Add `task_runs`.
 3. Backfill existing task statuses and execution history.
-4. Add Task Engine repositories and tests without changing the runtime entry
-   point.
-5. Add worker and scheduler commands behind explicit configuration.
-6. Disable in-process APScheduler and FastAPI synchronization background tasks.
-7. Update Docker Compose to start API, scheduler, and one worker.
-8. Observe a migration release before removing compatibility code.
+4. Add Task Engine repositories and adopt them inside the existing
+   single-process runtime.
+5. Prove the new state machine, payload parsers, retries, cancellation, and
+   idempotency behavior before changing process boundaries.
+6. Add the worker command and move execution behind it.
+7. Add the enqueue-only scheduler command.
+8. Disable in-process APScheduler and FastAPI synchronization background tasks.
+9. Update Docker Compose to start API, scheduler, and one worker.
+10. Observe a migration release before removing compatibility code.
+
+The state model and process split MUST land as separately testable steps.
+Changing both at once would make failures difficult to localize and rollback.
 
 Alembic is the only production schema migration authority.
 `Base.metadata.create_all()` must not be used to upgrade an existing database.
@@ -698,14 +865,21 @@ At minimum, automated integration tests must cover:
 - Two claim attempts cannot own the same task.
 - A heartbeat extends only the matching lock token.
 - A stale worker cannot finalize a reclaimed task.
+- A stale or unknown payload version is rejected before Provider execution.
 - An expired lease produces a lost run and a retry.
 - Retry exhaustion produces one terminal failed task.
+- A pending task can be cancelled without creating a run.
+- A running task becomes `CANCEL_REQUESTED` and only its owner finalizes it.
+- Cancellation during a Provider call preserves the actual remote outcome.
 - Scheduler restarts do not duplicate scheduled scan tasks.
 - Worker restart recovers pending and expired tasks.
 - API restart does not interrupt worker execution.
 - A scan that discovers the same file twice creates one transfer task.
+- A remote copy followed by local commit failure does not create a second copy
+  on retry.
 - Network failure followed by recovery completes without losing the task.
 - NAS-style full service restart recovers all non-terminal tasks.
+- SQLite deployment validation rejects worker concurrency greater than `1`.
 - Migration from the v0.1 schema preserves task and file history.
 
 Reliability testing should include:
@@ -736,6 +910,10 @@ v0.2 Foundation is accepted when:
 - Expired or rotated tokens do not silently lose tasks.
 - Duplicate scheduler ticks and repeated scans do not create duplicate
   transfers.
+- A remote success followed by a local commit failure is reconciled without a
+  duplicate transfer.
+- Cancellation never reports an unfinished or unknown remote operation as
+  successfully cancelled.
 - Every execution attempt is traceable through a task run.
 - Database backup and restore procedures are documented and tested.
 - CI validates backend tests, frontend build, migrations, and Docker images.
@@ -753,17 +931,20 @@ Goal: MediaSync can run unattended on NAS for weeks.
 The proposed v0.2 Foundation work order is:
 
 1. Worker and Task Engine architecture — this document.
-2. Task state machine and `task_runs` schema.
-3. Worker process and executor dispatch.
-4. Atomic claim, heartbeat, lease recovery, and fencing.
-5. Scheduler enqueue-only process.
-6. Provider SDK v2.
-7. Generic credential management.
-8. Target-folder ID and cache.
-9. Structured logging and service health.
-10. Database backup and restore.
-11. CI and Docker build pipeline.
-12. Reliability and migration testing.
+2. Task state machine, versioned payload, and `task_runs` schema.
+3. Task Engine repository, atomic claim, lease, fencing, cancellation, and
+   idempotency contracts.
+4. Adopt the Task Engine in the current single-process runtime.
+5. Stabilize the new model with integration and migration tests.
+6. Split out the worker process and executor dispatch.
+7. Split out the enqueue-only scheduler process.
+8. Provider SDK v2.
+9. Generic credential management.
+10. Target-folder ID and cache.
+11. Structured logging, event sink, and service health.
+12. Database backup and restore.
+13. CI and Docker build pipeline.
+14. Reliability and migration testing.
 
 Feature work and new Providers remain paused until the v0.2 Foundation
 acceptance criteria are met.
