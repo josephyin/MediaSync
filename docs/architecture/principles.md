@@ -103,3 +103,18 @@ The project MUST NOT add distributed infrastructure for hypothetical scale at
 the expense of the default NAS experience. PostgreSQL, multiple workers, or an
 external queue require demonstrated need, a Design PR, and an explicit
 deployment profile.
+
+## 6. Small, Reviewable Changes
+
+MediaSync prefers small, reviewable changes over large rewrites.
+
+- Each Issue SHOULD cover one architecture boundary.
+- Each PR SHOULD solve one explicit problem.
+- Incidental improvements MUST NOT silently expand the approved scope.
+- Large refactors SHOULD be delivered as a sequence of independently
+  reviewable changes.
+- Every step in that sequence MUST keep the project buildable, testable, and
+  releasable.
+
+Follow-up work should be recorded explicitly instead of being added because it
+is convenient to implement at the same time.
