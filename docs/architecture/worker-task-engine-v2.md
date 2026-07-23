@@ -222,6 +222,7 @@ lowercase strings.
 | `PENDING` | Ready to be claimed immediately. |
 | `RUNNING` | Owned by a worker with a valid lease. |
 | `RETRY` | Waiting until `next_attempt_at` after a retryable failure. |
+| `WAITING_CREDENTIAL` | Blocked until the related account credential is restored. |
 | `CANCEL_REQUESTED` | Cooperative cancellation or reconciliation is pending. |
 | `SUCCESS` | Completed successfully. |
 | `FAILED` | Terminal failure or retry budget exhausted. |
@@ -236,9 +237,12 @@ stateDiagram-v2
     RETRY --> RUNNING: retry time reached and claimed
     RUNNING --> SUCCESS: execution completed
     RUNNING --> RETRY: retryable error
+    RUNNING --> WAITING_CREDENTIAL: credential cannot be refreshed
     RUNNING --> FAILED: terminal error or retry limit
     PENDING --> CANCELLED: cancel before claim
     RETRY --> CANCELLED: cancel before retry
+    WAITING_CREDENTIAL --> PENDING: credential restored
+    WAITING_CREDENTIAL --> CANCELLED: cancel while blocked
     RUNNING --> CANCEL_REQUESTED: cancellation requested
     CANCEL_REQUESTED --> CANCELLED: worker stops at a safe point
     CANCEL_REQUESTED --> SUCCESS: irreversible work already completed
@@ -261,8 +265,8 @@ not erase the old task or its runs.
 
 Cancellation is cooperative:
 
-- A `PENDING` or `RETRY` task may move directly to `CANCELLED` because it has
-  no active executor.
+- A `PENDING`, `RETRY`, or `WAITING_CREDENTIAL` task may move directly to
+  `CANCELLED` because it has no active executor.
 - A `RUNNING` task MUST move to `CANCEL_REQUESTED`; it MUST NOT move directly
   to `CANCELLED`.
 - The owning worker continues heartbeat while the task is
@@ -279,7 +283,26 @@ Cancellation is cooperative:
 Cancellation does not guarantee rollback of a remote cloud-drive operation.
 The API and UI must communicate this limitation.
 
-### 3.4 State ownership
+### 3.4 Credential blocking semantics
+
+Credential failure is not always a task failure:
+
+- A transient token refresh timeout or Provider 5xx response enters `RETRY`
+  with normal backoff.
+- A revoked, invalid, or otherwise non-refreshable credential enters
+  `WAITING_CREDENTIAL`.
+- Entering `WAITING_CREDENTIAL` closes the current run as `blocked`, clears
+  task ownership, and does not consume the task's retry budget.
+- A blocked task MUST NOT be polled repeatedly or sent to a Provider.
+- After the related account is updated and successfully validated, a Task
+  Engine command moves its blocked tasks to `PENDING`.
+- Credential restoration must wake only tasks associated with the validated
+  account and must be idempotent.
+
+The UI should expose the blocking account and reason without exposing tokens,
+cookies, or raw Provider responses.
+
+### 3.5 State ownership
 
 | Transition | Owner |
 |---|---|
@@ -287,8 +310,10 @@ The API and UI must communicate this limitation.
 | `PENDING/RETRY → RUNNING` | Worker claim operation |
 | Extend `RUNNING/CANCEL_REQUESTED` lease | Owning worker |
 | `RUNNING → SUCCESS/RETRY/FAILED` | Owning worker |
+| `RUNNING → WAITING_CREDENTIAL` | Owning worker |
+| `WAITING_CREDENTIAL → PENDING` | Credential-restored Task Engine command |
 | Recover expired `RUNNING` | Worker recovery loop |
-| `PENDING/RETRY → CANCELLED` | Task Engine command |
+| `PENDING/RETRY/WAITING_CREDENTIAL → CANCELLED` | Task Engine command |
 | `RUNNING → CANCEL_REQUESTED` | Task Engine command |
 | `CANCEL_REQUESTED → SUCCESS/CANCELLED` | Owning worker |
 | Recover expired `CANCEL_REQUESTED` | Worker recovery loop |
@@ -474,6 +499,7 @@ Proposed fields:
 | `type` | `scan` or `transfer`. |
 | `status` | Queue state. |
 | `priority` | Higher value claims first. |
+| `account_id` | Related cloud account for execution and credential blocking. |
 | `subscription_id` | Related subscription, when applicable. |
 | `file_id` | Related indexed file, when applicable. |
 | `payload_version` | Explicit parser version for the task payload. |
@@ -482,6 +508,8 @@ Proposed fields:
 | `retry_count` | Completed unsuccessful attempts. |
 | `max_retries` | Retry budget. |
 | `next_attempt_at` | Earliest retry time. |
+| `blocked_reason` | Normalized reason for a non-runnable blocked state. |
+| `blocked_at` | Time the task entered its current blocked state. |
 | `cancel_requested_at` | Time cooperative cancellation was requested. |
 | `locked_by` | Current worker instance. |
 | `lock_token` | Fencing token for the current claim. |
@@ -498,6 +526,7 @@ Recommended indexes:
 UNIQUE(idempotency_key)
 INDEX(status, next_attempt_at, priority, created_at)
 INDEX(subscription_id, created_at)
+INDEX(account_id, status)
 INDEX(file_id, created_at)
 INDEX(status, lease_until)
 ```
@@ -521,7 +550,7 @@ Proposed fields:
 | `run_number` | Monotonic attempt number per task. |
 | `worker_id` | Worker that executed the attempt. |
 | `lock_token` | Claim token associated with the attempt. |
-| `status` | `running`, `success`, `failed`, `lost`, or `cancelled`. |
+| `status` | `running`, `success`, `failed`, `blocked`, `lost`, or `cancelled`. |
 | `started_at`, `finished_at` | Attempt timing. |
 | `last_heartbeat_at` | Last confirmed activity. |
 | `duration_ms` | Derived execution duration. |
@@ -662,6 +691,7 @@ directly:
 ```text
 Success(result, metrics)
 RetryableFailure(code, message, retry_after)
+CredentialBlocked(code, account_id, message)
 TerminalFailure(code, message)
 Cancelled(result, metrics)
 OwnershipLost
@@ -794,7 +824,7 @@ documentation.
 | NAS restart | Non-terminal tasks recover after services restart. |
 | Network outage | Retryable failures use bounded exponential backoff. |
 | Provider rate limit | Honor `Retry-After` where available. |
-| Token expiry | Credential refresh is attempted once under account-level coordination. |
+| Token expiry | Refresh once under account-level coordination; non-refreshable credentials move the task to `WAITING_CREDENTIAL`. |
 | Database busy | Retry short queue transactions with bounded backoff. |
 | Duplicate scheduler tick | Unique task key prevents duplicate scan intent. |
 | Duplicate file discovery | Unique transfer key prevents duplicate transfer intent. |
@@ -832,8 +862,8 @@ a substitute for application logs.
 
 The migration must be additive and recoverable:
 
-1. Add claim, lease, retry, priority, cancellation, `payload_version`, and
-   completion fields to `tasks`.
+1. Add account, claim, lease, retry, credential-blocking, priority,
+   cancellation, `payload_version`, and completion fields to `tasks`.
 2. Add `task_runs`.
 3. Backfill existing task statuses and execution history.
 4. Add Task Engine repositories and adopt them inside the existing
@@ -868,6 +898,8 @@ At minimum, automated integration tests must cover:
 - A stale or unknown payload version is rejected before Provider execution.
 - An expired lease produces a lost run and a retry.
 - Retry exhaustion produces one terminal failed task.
+- A non-refreshable credential blocks the task without consuming retry budget.
+- Successful account validation wakes only that account's blocked tasks.
 - A pending task can be cancelled without creating a run.
 - A running task becomes `CANCEL_REQUESTED` and only its owner finalizes it.
 - Cancellation during a Provider call preserves the actual remote outcome.
@@ -895,7 +927,52 @@ Reliability testing should include:
 Before beginning Quark Drive work, the v0.2 architecture should run under the
 maintainer's real NAS workload for an extended dogfooding period.
 
-## 14. v0.2 Foundation acceptance criteria
+## 14. Non-functional requirements
+
+These requirements are release gates, not optional implementation guidance.
+They explain why the state, lease, fencing, idempotency, and migration
+invariants must not be bypassed by individual features.
+
+### 14.1 Reliability requirements
+
+| ID | Scenario | Required outcome |
+|---|---|---|
+| `NFR-R01` | Worker is executing when the NAS restarts. | After services become healthy, every non-terminal task is recovered within its lease and recovery window. The interrupted run remains as `lost`, a new run records recovery, and no duplicate transfer intent is created. |
+| `NFR-R02` | Aliyun Drive times out, rate-limits, or returns a retryable 5xx response. | The error is normalized, the task enters `RETRY`, and bounded exponential backoff with jitter prevents a hot retry loop. Provider `Retry-After` takes precedence when valid. |
+| `NFR-R03` | A credential expires or is revoked. | MediaSync attempts coordinated refresh. A non-refreshable credential moves affected tasks to `WAITING_CREDENTIAL`, not `FAILED`; successful account validation wakes them without consuming retry budget. |
+| `NFR-R04` | The remote transfer succeeds but the local commit fails. | The next attempt reconciles the remote destination or stable receipt before issuing another copy. The system must not knowingly create a duplicate transfer. |
+| `NFR-R05` | Scheduler restarts between discovering and advancing a subscription. | The task insert and `next_scan_at` update are atomic, and the occurrence idempotency key prevents duplicate scheduled intent. |
+| `NFR-R06` | API returns success for a manual trigger. | The task is durably committed before HTTP `202` is returned; no synchronization intent exists only in process memory. |
+| `NFR-R07` | A v0.1 installation upgrades to v0.2. | Alembic preserves subscriptions, files, task history, and credentials. Upgrade instructions require a pre-migration backup and document version-compatible rollback or restore. |
+| `NFR-R08` | An operator investigates a failed or recovered task. | The task, every run, normalized error, worker identity, timestamps, and correlation fields remain traceable without relying only on container logs. |
+| `NFR-R09` | Errors and events contain Provider context. | Logs, tasks, runs, metrics, and events never persist refresh tokens, cookies, authorization headers, or unsanitized raw Provider responses. |
+
+### 14.2 Retry policy
+
+The default retry delay should be calculated from a configurable base,
+exponent, maximum delay, and jitter:
+
+```text
+delay = min(max_delay, base_delay * 2 ^ retry_count)
+scheduled_delay = full_jitter(0, delay)
+```
+
+Provider `Retry-After` takes precedence when it is valid and does not violate
+an operator-configured safety maximum. Credential-blocked tasks do not use
+this retry loop.
+
+Retry limits and delays may differ by task type and normalized error code, but
+executors MUST NOT implement private sleep-and-retry loops outside the Task
+Engine.
+
+### 14.3 Acceptance evidence
+
+Each reliability requirement must be backed by an automated integration or
+migration test where practical. Restart recovery, database backup/restore, and
+remote reconciliation also require Docker Compose or NAS-style fault-injection
+evidence before v0.2 is declared stable.
+
+## 15. v0.2 Foundation acceptance criteria
 
 The release goal is:
 
@@ -908,6 +985,8 @@ v0.2 Foundation is accepted when:
 - Worker crashes recover through lease expiry.
 - Network failures retry automatically with bounded backoff.
 - Expired or rotated tokens do not silently lose tasks.
+- Non-refreshable credentials wait for account repair instead of exhausting
+  the task retry budget.
 - Duplicate scheduler ticks and repeated scans do not create duplicate
   transfers.
 - A remote success followed by a local commit failure is reconciled without a
@@ -926,7 +1005,7 @@ v0.2 Foundation
 Goal: MediaSync can run unattended on NAS for weeks.
 ```
 
-## 15. Implementation order
+## 16. Implementation order
 
 The proposed v0.2 Foundation work order is:
 
