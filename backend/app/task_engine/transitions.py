@@ -15,7 +15,7 @@ ALLOWED_TASK_TRANSITIONS: Mapping[str, Set[str]] = {
     ),
     "retry": frozenset({"running", "cancelled"}),
     "waiting_credential": frozenset({"pending", "cancelled"}),
-    "cancel_requested": frozenset({"cancelled", "success"}),
+    "cancel_requested": frozenset({"cancel_requested", "cancelled", "success"}),
     "success": frozenset(),
     "failed": frozenset(),
     "cancelled": frozenset(),

@@ -92,6 +92,30 @@ def test_transition_rejects_expected_state_mismatch(db: Session) -> None:
     assert task.status == "pending"
 
 
+def test_cancel_requested_reentry_preserves_original_request_time(db: Session) -> None:
+    repository = TaskRepository(db)
+    task = Task(type="transfer", status="running")
+    db.add(task)
+    db.commit()
+    requested_at = utcnow()
+
+    repository.transition(
+        task.id,
+        expected_status="running",
+        target_status="cancel_requested",
+        occurred_at=requested_at,
+    )
+    repository.transition(
+        task.id,
+        expected_status="cancel_requested",
+        target_status="cancel_requested",
+        occurred_at=utcnow(),
+    )
+
+    assert task.status == "cancel_requested"
+    assert task.cancel_requested_at == requested_at
+
+
 def test_create_task_requires_pending_state(db: Session) -> None:
     repository = TaskRepository(db)
 

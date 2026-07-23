@@ -216,7 +216,7 @@ class TaskRepository:
             task.blocked_reason = None
             task.blocked_at = None
 
-        if target_status == "cancel_requested":
+        if target_status == "cancel_requested" and task.cancel_requested_at is None:
             task.cancel_requested_at = occurred_at
 
         task.completed_at = occurred_at if target_status in TERMINAL_TASK_STATUSES else None
