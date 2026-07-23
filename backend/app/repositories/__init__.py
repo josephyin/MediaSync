@@ -1,7 +1,10 @@
 from app.repositories.task_runs import TaskRunRepository
 from app.repositories.tasks import (
     ActiveTaskRunExistsError,
+    TaskClaim,
     TaskNotFoundError,
+    TaskOwnershipLostError,
+    TaskOwnershipRequiredError,
     TaskRepository,
     TaskRunNotFoundError,
     TaskStateConflictError,
@@ -9,7 +12,10 @@ from app.repositories.tasks import (
 
 __all__ = [
     "ActiveTaskRunExistsError",
+    "TaskClaim",
     "TaskNotFoundError",
+    "TaskOwnershipLostError",
+    "TaskOwnershipRequiredError",
     "TaskRepository",
     "TaskRunNotFoundError",
     "TaskRunRepository",
