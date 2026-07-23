@@ -1,13 +1,17 @@
-from datetime import datetime
+import secrets
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.base import utcnow
 from app.models.task import TERMINAL_TASK_RUN_STATUSES, Task, TaskRun
-from app.repositories.task_runs import TaskRunRepository
 from app.task_engine.transitions import TERMINAL_TASK_STATUSES, validate_transition
 
+CLAIMABLE_TASK_STATUSES = ("pending", "retry")
+LEASED_TASK_STATUSES = ("running", "cancel_requested")
 TASK_TO_RUN_TERMINAL_STATUS = {
     "success": "success",
     "failed": "failed",
@@ -39,12 +43,36 @@ class ActiveTaskRunExistsError(RuntimeError):
     pass
 
 
+class TaskOwnershipRequiredError(RuntimeError):
+    pass
+
+
+class TaskOwnershipLostError(RuntimeError):
+    def __init__(self, task_id: int, worker_id: str) -> None:
+        self.task_id = task_id
+        self.worker_id = worker_id
+        super().__init__(f"worker {worker_id!r} does not own active task {task_id}")
+
+
+@dataclass(frozen=True)
+class TaskClaim:
+    task: Task
+    task_run: TaskRun
+    lock_token: str
+    lease_until: datetime
+
+
 class TaskRepository:
     """The v2 persistence entrypoint for Task and Task Run state changes."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        clock: Callable[[], datetime] = utcnow,
+    ) -> None:
         self._session = session
-        self._runs = TaskRunRepository(session)
+        self._clock = clock
 
     def create_task(self, task: Task) -> Task:
         if task.status is None:
@@ -79,29 +107,125 @@ class TaskRepository:
         task = self._require_task(task_id)
         self._validate_expected_status(task, expected_status)
         validate_transition(expected_status, target_status)
-        self._apply_task_transition(
-            task,
+        if target_status == "running" or (
+            expected_status in LEASED_TASK_STATUSES
+            and target_status != "cancel_requested"
+        ):
+            raise TaskOwnershipRequiredError(
+                f"task transition {expected_status!r} -> {target_status!r} "
+                "requires an ownership-aware repository operation"
+            )
+        now = occurred_at or self._clock()
+        transition_values = self._task_transition_values(
             target_status=target_status,
-            occurred_at=occurred_at or utcnow(),
+            occurred_at=now,
             blocked_reason=blocked_reason,
             error_code=error_code,
             error_message=error_message,
             next_attempt_at=next_attempt_at,
         )
-        self._session.flush()
-        return task
+        if target_status == "cancel_requested":
+            transition_values["cancel_requested_at"] = func.coalesce(
+                Task.cancel_requested_at,
+                now,
+            )
+        transitioned_task_id = self._session.scalar(
+            update(Task)
+            .where(Task.id == task_id, Task.status == expected_status)
+            .values(**transition_values, updated_at=now)
+            .returning(Task.id)
+            .execution_options(synchronize_session=False)
+        )
+        if transitioned_task_id is None:
+            actual = self._require_task(task_id, populate_existing=True)
+            raise TaskStateConflictError(task_id, expected_status, actual.status)
+        return self._require_task(transitioned_task_id, populate_existing=True)
+
+    def claim_next(
+        self,
+        *,
+        worker_id: str,
+        lease_duration: timedelta,
+        claimed_at: datetime | None = None,
+    ) -> TaskClaim | None:
+        self._validate_owner_arguments(worker_id, lease_duration)
+        now = claimed_at or self._clock()
+        lease_until = now + lease_duration
+        lock_token = secrets.token_hex(32)
+        candidate_id = (
+            select(Task.id)
+            .where(
+                Task.status.in_(CLAIMABLE_TASK_STATUSES),
+                or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+                Task.locked_by.is_(None),
+                Task.lock_token.is_(None),
+                Task.locked_at.is_(None),
+                Task.lease_until.is_(None),
+            )
+            .order_by(
+                Task.priority.desc(),
+                func.coalesce(Task.next_attempt_at, Task.created_at).asc(),
+                Task.created_at.asc(),
+                Task.id.asc(),
+            )
+            .limit(1)
+            .scalar_subquery()
+        )
+        claim_statement = (
+            update(Task)
+            .where(
+                Task.id == candidate_id,
+                Task.status.in_(CLAIMABLE_TASK_STATUSES),
+                or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+            )
+            .values(
+                status="running",
+                locked_by=worker_id,
+                lock_token=lock_token,
+                locked_at=now,
+                lease_until=lease_until,
+                next_attempt_at=None,
+                updated_at=now,
+            )
+            .returning(Task.id)
+        )
+
+        with self._session.begin_nested():
+            task_id = self._session.scalar(
+                claim_statement.execution_options(synchronize_session=False)
+            )
+            if task_id is None:
+                return None
+            task = self._require_task(task_id, populate_existing=True)
+            task_run = self.create_run(
+                task_id,
+                worker_id=worker_id,
+                lock_token=lock_token,
+                started_at=now,
+                last_heartbeat_at=now,
+            )
+
+        return TaskClaim(
+            task=task,
+            task_run=task_run,
+            lock_token=lock_token,
+            lease_until=lease_until,
+        )
 
     def create_run(
         self,
         task_id: int,
         *,
-        worker_id: str | None = None,
-        lock_token: str | None = None,
+        worker_id: str,
+        lock_token: str,
         started_at: datetime | None = None,
+        last_heartbeat_at: datetime | None = None,
     ) -> TaskRun:
         task = self._require_task(task_id)
         if task.status != "running":
             raise TaskStateConflictError(task.id, "running", task.status)
+        if task.locked_by != worker_id or task.lock_token != lock_token:
+            raise TaskOwnershipLostError(task_id, worker_id)
         active_run_id = self._session.scalar(
             select(TaskRun.id).where(
                 TaskRun.task_id == task_id,
@@ -118,15 +242,68 @@ class TaskRepository:
             )
             or 0
         ) + 1
-        return self._runs.append(
+        return self._append_task_run(
             TaskRun(
                 task_id=task_id,
                 run_number=next_run_number,
                 worker_id=worker_id,
                 lock_token=lock_token,
                 status="running",
-                started_at=started_at or utcnow(),
+                started_at=started_at or self._clock(),
+                last_heartbeat_at=last_heartbeat_at,
             )
+        )
+
+    def heartbeat(
+        self,
+        task_id: int,
+        *,
+        worker_id: str,
+        lock_token: str,
+        lease_duration: timedelta,
+        heartbeat_at: datetime | None = None,
+    ) -> tuple[Task, TaskRun]:
+        self._validate_owner_arguments(worker_id, lease_duration)
+        if not lock_token:
+            raise ValueError("lock_token must not be empty")
+        now = heartbeat_at or self._clock()
+        lease_until = now + lease_duration
+
+        with self._session.begin_nested():
+            task_id_result = self._session.scalar(
+                update(Task)
+                .where(
+                    Task.id == task_id,
+                    Task.status.in_(LEASED_TASK_STATUSES),
+                    Task.locked_by == worker_id,
+                    Task.lock_token == lock_token,
+                    Task.lease_until > now,
+                )
+                .values(lease_until=lease_until, updated_at=now)
+                .returning(Task.id)
+                .execution_options(synchronize_session=False)
+            )
+            if task_id_result is None:
+                raise TaskOwnershipLostError(task_id, worker_id)
+
+            task_run_id = self._session.scalar(
+                update(TaskRun)
+                .where(
+                    TaskRun.task_id == task_id,
+                    TaskRun.status == "running",
+                    TaskRun.worker_id == worker_id,
+                    TaskRun.lock_token == lock_token,
+                )
+                .values(last_heartbeat_at=now, updated_at=now)
+                .returning(TaskRun.id)
+                .execution_options(synchronize_session=False)
+            )
+            if task_run_id is None:
+                raise TaskOwnershipLostError(task_id, worker_id)
+
+        return (
+            self._require_task(task_id, populate_existing=True),
+            self._require_task_run(task_run_id, populate_existing=True),
         )
 
     def finish_run(
@@ -134,6 +311,8 @@ class TaskRepository:
         task_id: int,
         task_run_id: int,
         *,
+        worker_id: str,
+        lock_token: str,
         expected_task_status: str,
         task_status: str,
         run_status: str,
@@ -146,8 +325,10 @@ class TaskRepository:
         blocked_reason: str | None = None,
         next_attempt_at: datetime | None = None,
     ) -> tuple[Task, TaskRun]:
-        task = self._require_task(task_id)
-        self._validate_expected_status(task, expected_task_status)
+        if not worker_id:
+            raise ValueError("worker_id must not be empty")
+        if not lock_token:
+            raise ValueError("lock_token must not be empty")
         validate_transition(expected_task_status, task_status)
         expected_run_status = TASK_TO_RUN_TERMINAL_STATUS.get(task_status)
         if expected_run_status != run_status or run_status not in TERMINAL_TASK_RUN_STATUSES:
@@ -155,38 +336,121 @@ class TaskRepository:
                 f"task status {task_status!r} requires run status {expected_run_status!r}"
             )
 
-        task_run = self._runs.get(task_run_id)
-        if task_run is None or task_run.task_id != task_id:
-            raise TaskRunNotFoundError(f"task run {task_run_id} not found for task {task_id}")
-        if task_run.status != "running":
-            raise ValueError("only an active task run can be finished")
-
-        now = finished_at or utcnow()
-        self._apply_task_transition(
-            task,
+        ownership_checked_at = self._clock()
+        outcome_at = finished_at or ownership_checked_at
+        task_values = self._task_transition_values(
             target_status=task_status,
-            occurred_at=now,
+            occurred_at=outcome_at,
             blocked_reason=blocked_reason,
             error_code=error_code,
             error_message=error_message,
             next_attempt_at=next_attempt_at,
         )
-        task_run.status = run_status
-        task_run.finished_at = now
-        task_run.duration_ms = duration_ms
-        task_run.result_summary = result_summary
-        task_run.error_code = error_code
-        task_run.error_message = error_message
+        task_values.update(
+            {
+                "locked_by": None,
+                "lock_token": None,
+                "locked_at": None,
+                "lease_until": None,
+                "updated_at": ownership_checked_at,
+            }
+        )
+        run_values: dict[str, object] = {
+            "status": run_status,
+            "finished_at": outcome_at,
+            "duration_ms": duration_ms,
+            "result_summary": result_summary,
+            "error_code": error_code,
+            "error_message": error_message,
+            "updated_at": ownership_checked_at,
+        }
         if metrics is not None:
-            task_run.metrics = metrics
-        self._session.flush()
-        return task, task_run
+            run_values["metrics"] = metrics
 
-    def _require_task(self, task_id: int) -> Task:
-        task = self.get(task_id)
+        with self._session.begin_nested():
+            persisted_task_id = self._session.scalar(
+                update(Task)
+                .where(
+                    Task.id == task_id,
+                    Task.status == expected_task_status,
+                    Task.locked_by == worker_id,
+                    Task.lock_token == lock_token,
+                    Task.lease_until > ownership_checked_at,
+                )
+                .values(**task_values)
+                .returning(Task.id)
+                .execution_options(synchronize_session=False)
+            )
+            if persisted_task_id is None:
+                raise TaskOwnershipLostError(task_id, worker_id)
+
+            persisted_run_id = self._session.scalar(
+                update(TaskRun)
+                .where(
+                    TaskRun.id == task_run_id,
+                    TaskRun.task_id == task_id,
+                    TaskRun.status == "running",
+                    TaskRun.worker_id == worker_id,
+                    TaskRun.lock_token == lock_token,
+                )
+                .values(**run_values)
+                .returning(TaskRun.id)
+                .execution_options(synchronize_session=False)
+            )
+            if persisted_run_id is None:
+                raise TaskRunNotFoundError(
+                    f"active task run {task_run_id} not found for owned task {task_id}"
+                )
+
+        return (
+            self._require_task(persisted_task_id, populate_existing=True),
+            self._require_task_run(persisted_run_id, populate_existing=True),
+        )
+
+    def _require_task(self, task_id: int, *, populate_existing: bool = False) -> Task:
+        if populate_existing:
+            task = self._session.scalar(
+                select(Task)
+                .where(Task.id == task_id)
+                .execution_options(populate_existing=True)
+            )
+        else:
+            task = self.get(task_id)
         if task is None:
             raise TaskNotFoundError(f"task {task_id} not found")
         return task
+
+    def _require_task_run(
+        self,
+        task_run_id: int,
+        *,
+        populate_existing: bool = False,
+    ) -> TaskRun:
+        if populate_existing:
+            task_run = self._session.scalar(
+                select(TaskRun)
+                .where(TaskRun.id == task_run_id)
+                .execution_options(populate_existing=True)
+            )
+        else:
+            task_run = self._session.get(TaskRun, task_run_id)
+        if task_run is None:
+            raise TaskRunNotFoundError(f"task run {task_run_id} not found")
+        return task_run
+
+    def _append_task_run(self, task_run: TaskRun) -> TaskRun:
+        if task_run.status != "running":
+            raise ValueError("a new task run must start in running state")
+        self._session.add(task_run)
+        self._session.flush()
+        return task_run
+
+    @staticmethod
+    def _validate_owner_arguments(worker_id: str, lease_duration: timedelta) -> None:
+        if not worker_id:
+            raise ValueError("worker_id must not be empty")
+        if lease_duration <= timedelta(0):
+            raise ValueError("lease_duration must be positive")
 
     @staticmethod
     def _validate_expected_status(task: Task, expected_status: str) -> None:
@@ -194,8 +458,7 @@ class TaskRepository:
             raise TaskStateConflictError(task.id, expected_status, task.status)
 
     @staticmethod
-    def _apply_task_transition(
-        task: Task,
+    def _task_transition_values(
         *,
         target_status: str,
         occurred_at: datetime,
@@ -203,20 +466,24 @@ class TaskRepository:
         error_code: str | None,
         error_message: str | None,
         next_attempt_at: datetime | None,
-    ) -> None:
-        task.status = target_status
-        task.last_error_code = error_code
-        task.last_error_message = error_message
-        task.next_attempt_at = next_attempt_at if target_status == "retry" else None
-
+    ) -> dict[str, object | None]:
+        values: dict[str, object | None] = {
+            "status": target_status,
+            "last_error_code": error_code,
+            "last_error_message": error_message,
+            "next_attempt_at": next_attempt_at if target_status == "retry" else None,
+            "completed_at": (
+                occurred_at if target_status in TERMINAL_TASK_STATUSES else None
+            ),
+        }
         if target_status == "waiting_credential":
-            task.blocked_reason = blocked_reason
-            task.blocked_at = occurred_at
+            values["blocked_reason"] = blocked_reason
+            values["blocked_at"] = occurred_at
         elif target_status != "cancel_requested":
-            task.blocked_reason = None
-            task.blocked_at = None
+            values["blocked_reason"] = None
+            values["blocked_at"] = None
 
-        if target_status == "cancel_requested" and task.cancel_requested_at is None:
-            task.cancel_requested_at = occurred_at
+        if target_status == "cancel_requested":
+            values["cancel_requested_at"] = occurred_at
 
-        task.completed_at = occurred_at if target_status in TERMINAL_TASK_STATUSES else None
+        return values

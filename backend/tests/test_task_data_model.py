@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Base, Task, TaskRun
 from app.models.base import utcnow
-from app.repositories import TaskRunRepository
 
 
 @pytest.fixture
@@ -99,17 +98,18 @@ def test_terminal_task_run_cannot_be_changed_or_deleted(db: Session) -> None:
     task = Task(type="scan")
     db.add(task)
     db.flush()
-    repository = TaskRunRepository(db)
-    task_run = repository.append(
-        TaskRun(task_id=task.id, run_number=1, status="running", started_at=utcnow())
+    task_run = TaskRun(
+        task_id=task.id,
+        run_number=1,
+        status="running",
+        started_at=utcnow(),
     )
-    repository.finalize(
-        task_run.id,
-        status="success",
-        finished_at=utcnow(),
-        result_summary="scan completed",
-        metrics={"items_seen": 10},
-    )
+    db.add(task_run)
+    db.flush()
+    task_run.status = "success"
+    task_run.finished_at = utcnow()
+    task_run.result_summary = "scan completed"
+    task_run.metrics = {"items_seen": 10}
     db.commit()
 
     task_run.result_summary = "rewritten result"
@@ -128,14 +128,24 @@ def test_later_attempt_appends_a_new_task_run(db: Session) -> None:
     task = Task(type="transfer")
     db.add(task)
     db.flush()
-    repository = TaskRunRepository(db)
-    first = repository.append(
-        TaskRun(task_id=task.id, run_number=1, status="running", started_at=utcnow())
+    first = TaskRun(
+        task_id=task.id,
+        run_number=1,
+        status="running",
+        started_at=utcnow(),
     )
-    repository.finalize(first.id, status="failed", finished_at=utcnow())
-    second = repository.append(
-        TaskRun(task_id=task.id, run_number=2, status="running", started_at=utcnow())
+    db.add(first)
+    db.flush()
+    first.status = "failed"
+    first.finished_at = utcnow()
+    db.flush()
+    second = TaskRun(
+        task_id=task.id,
+        run_number=2,
+        status="running",
+        started_at=utcnow(),
     )
+    db.add(second)
     db.commit()
 
     assert first.status == "failed"
