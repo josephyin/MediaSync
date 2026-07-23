@@ -1,0 +1,52 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: sqlite:////data/mediasync.db
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?Set CREDENTIAL_ENCRYPTION_KEY in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      ALIYUNDRIVE_MODE: ${ALIYUNDRIVE_MODE:-private_api}
+      ALIYUNDRIVE_PRIVATE_API_BASE_URL: ${ALIYUNDRIVE_PRIVATE_API_BASE_URL:-https://api.alipan.com}
+      ALIYUNDRIVE_PRIVATE_AUTH_BASE_URL: ${ALIYUNDRIVE_PRIVATE_AUTH_BASE_URL:-https://auth.alipan.com}
+      ALIYUNDRIVE_QR_LOGIN_BASE_URL: ${ALIYUNDRIVE_QR_LOGIN_BASE_URL:-https://passport.aliyundrive.com}
+      ALIYUNDRIVE_CLIENT_ID: ${ALIYUNDRIVE_CLIENT_ID:-}
+      ALIYUNDRIVE_CLIENT_SECRET: ${ALIYUNDRIVE_CLIENT_SECRET:-}
+      ALIYUNDRIVE_API_BASE_URL: ${ALIYUNDRIVE_API_BASE_URL:-https://openapi.alipan.com}
+      ALIYUNDRIVE_REQUEST_INTERVAL_SECONDS: ${ALIYUNDRIVE_REQUEST_INTERVAL_SECONDS:-0.8}
+      ALIYUNDRIVE_REQUEST_JITTER_SECONDS: ${ALIYUNDRIVE_REQUEST_JITTER_SECONDS:-0.3}
+      ALIYUNDRIVE_REQUEST_MAX_RETRIES: ${ALIYUNDRIVE_REQUEST_MAX_RETRIES:-3}
+      ALIYUNDRIVE_RETRY_BACKOFF_SECONDS: ${ALIYUNDRIVE_RETRY_BACKOFF_SECONDS:-2}
+      ALIYUNDRIVE_RETRY_MAX_SECONDS: ${ALIYUNDRIVE_RETRY_MAX_SECONDS:-30}
+      SCHEDULER_JITTER_SECONDS: ${SCHEDULER_JITTER_SECONDS:-120}
+      MANUAL_SCAN_COOLDOWN_SECONDS: ${MANUAL_SCAN_COOLDOWN_SECONDS:-60}
+      FOLDER_SCAN_BATCH_SIZE: ${FOLDER_SCAN_BATCH_SIZE:-20}
+      FULL_SCAN_INTERVAL_HOURS: ${FULL_SCAN_INTERVAL_HOURS:-24}
+      TRANSFER_BATCH_SIZE: ${TRANSFER_BATCH_SIZE:-2}
+      TRANSFER_RETRY_BASE_SECONDS: ${TRANSFER_RETRY_BASE_SECONDS:-30}
+      TRANSFER_RETRY_MAX_SECONDS: ${TRANSFER_RETRY_MAX_SECONDS:-900}
+    volumes:
+      - mediasync-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/system/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  mediasync-data:
