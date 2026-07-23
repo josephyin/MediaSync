@@ -2,7 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-07-23
-- Owners: MediaSync maintainers
+- Decision Makers: MediaSync maintainers
+- Supersedes: None
+- Superseded by: None
 - Related: [Worker and Task Engine v2 Architecture](../worker-task-engine-v2.md)
 
 ## Context

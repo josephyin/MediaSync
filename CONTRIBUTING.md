@@ -34,6 +34,15 @@ Runtime PR
 - Scheduler
 - Storage
 
+以下变化视为触发条件：
+
+- 数据模型、持久化语义或迁移兼容性变化。
+- 状态机、生命周期或终态语义变化。
+- Provider 或 Storage contract 变化。
+- Scheduler、Worker 或任务所有权边界变化。
+- Credential、安全、加密或认证模型变化。
+- 支持的部署拓扑或基础设施依赖变化。
+
 Design PR 必须说明状态、约束、生命周期、失败恢复、迁移兼容性和非目标。
 Runtime PR 必须关联已合并的设计文档或 ADR，并保持 Issue 约定的边界。
 不得在数据模型 PR 中顺带实现 Worker、Scheduler 或 Provider 行为。

@@ -38,7 +38,9 @@ Supported statuses:
 
 Numbers are never reused. Accepted ADRs are historical records and MUST NOT be
 rewritten to reflect a new decision. Correct small factual or formatting
-errors in place; use a new ADR to supersede a decision.
+errors in place; use a new ADR to supersede a decision. Status and
+`Superseded by` metadata may be updated to link the historical record to its
+replacement, but the original context and decision remain unchanged.
 
 ## Process
 
@@ -60,7 +62,9 @@ An ADR marked `Accepted` becomes binding when its Design PR is merged.
 
 - Status: Proposed
 - Date: YYYY-MM-DD
-- Owners: MediaSync maintainers
+- Decision Makers: MediaSync maintainers
+- Supersedes: None
+- Superseded by: None
 - Related: links to Design Specs, Issues, or PRs
 
 ## Context
