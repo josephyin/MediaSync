@@ -1,5 +1,7 @@
 from app.repositories.tasks import (
     ActiveTaskRunExistsError,
+    ExpiredTaskLease,
+    RecoveredTaskLease,
     TaskClaim,
     TaskNotFoundError,
     TaskOwnershipLostError,
@@ -11,6 +13,8 @@ from app.repositories.tasks import (
 
 __all__ = [
     "ActiveTaskRunExistsError",
+    "ExpiredTaskLease",
+    "RecoveredTaskLease",
     "TaskClaim",
     "TaskNotFoundError",
     "TaskOwnershipLostError",

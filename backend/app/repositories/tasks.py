@@ -3,15 +3,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.base import utcnow
 from app.models.task import TERMINAL_TASK_RUN_STATUSES, Task, TaskRun
 from app.task_engine.transitions import TERMINAL_TASK_STATUSES, validate_transition
 
-CLAIMABLE_TASK_STATUSES = ("pending", "retry")
+QUEUE_TASK_STATUSES = ("pending", "retry")
+CLAIMABLE_TASK_STATUSES = (*QUEUE_TASK_STATUSES, "cancel_requested")
 LEASED_TASK_STATUSES = ("running", "cancel_requested")
+LEASE_EXPIRED_ERROR_CODE = "WORKER_LEASE_EXPIRED"
+LEASE_EXPIRED_ERROR_MESSAGE = "worker lease expired before task completion"
 TASK_TO_RUN_TERMINAL_STATUS = {
     "success": "success",
     "failed": "failed",
@@ -60,6 +63,22 @@ class TaskClaim:
     task_run: TaskRun
     lock_token: str
     lease_until: datetime
+
+
+@dataclass(frozen=True)
+class ExpiredTaskLease:
+    task_id: int
+    status: str
+    worker_id: str
+    lock_token: str
+    lease_until: datetime
+
+
+@dataclass(frozen=True)
+class RecoveredTaskLease:
+    task: Task
+    task_run: TaskRun
+    previous_lock_token: str
 
 
 class TaskRepository:
@@ -152,16 +171,26 @@ class TaskRepository:
         now = claimed_at or self._clock()
         lease_until = now + lease_duration
         lock_token = secrets.token_hex(32)
+        ownership_is_clear = and_(
+            Task.locked_by.is_(None),
+            Task.lock_token.is_(None),
+            Task.locked_at.is_(None),
+            Task.lease_until.is_(None),
+        )
+        is_claimable = or_(
+            and_(
+                Task.status.in_(QUEUE_TASK_STATUSES),
+                or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+                ownership_is_clear,
+            ),
+            and_(
+                Task.status == "cancel_requested",
+                ownership_is_clear,
+            ),
+        )
         candidate_id = (
             select(Task.id)
-            .where(
-                Task.status.in_(CLAIMABLE_TASK_STATUSES),
-                or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
-                Task.locked_by.is_(None),
-                Task.lock_token.is_(None),
-                Task.locked_at.is_(None),
-                Task.lease_until.is_(None),
-            )
+            .where(is_claimable)
             .order_by(
                 Task.priority.desc(),
                 func.coalesce(Task.next_attempt_at, Task.created_at).asc(),
@@ -176,10 +205,18 @@ class TaskRepository:
             .where(
                 Task.id == candidate_id,
                 Task.status.in_(CLAIMABLE_TASK_STATUSES),
-                or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+                ownership_is_clear,
+                or_(
+                    Task.status == "cancel_requested",
+                    Task.next_attempt_at.is_(None),
+                    Task.next_attempt_at <= now,
+                ),
             )
             .values(
-                status="running",
+                status=case(
+                    (Task.status == "cancel_requested", "cancel_requested"),
+                    else_="running",
+                ),
                 locked_by=worker_id,
                 lock_token=lock_token,
                 locked_at=now,
@@ -222,8 +259,12 @@ class TaskRepository:
         last_heartbeat_at: datetime | None = None,
     ) -> TaskRun:
         task = self._require_task(task_id)
-        if task.status != "running":
-            raise TaskStateConflictError(task.id, "running", task.status)
+        if task.status not in LEASED_TASK_STATUSES:
+            raise TaskStateConflictError(
+                task.id,
+                "running or cancel_requested",
+                task.status,
+            )
         if task.locked_by != worker_id or task.lock_token != lock_token:
             raise TaskOwnershipLostError(task_id, worker_id)
         active_run_id = self._session.scalar(
@@ -407,6 +448,145 @@ class TaskRepository:
             self._require_task_run(persisted_run_id, populate_existing=True),
         )
 
+    def list_expired_leases(
+        self,
+        *,
+        limit: int = 100,
+        expired_at: datetime | None = None,
+    ) -> list[ExpiredTaskLease]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        now = expired_at or self._clock()
+        rows = self._session.execute(
+            select(
+                Task.id,
+                Task.status,
+                Task.locked_by,
+                Task.lock_token,
+                Task.lease_until,
+            )
+            .where(
+                Task.status.in_(LEASED_TASK_STATUSES),
+                Task.locked_by.is_not(None),
+                Task.lock_token.is_not(None),
+                Task.lease_until.is_not(None),
+                Task.lease_until <= now,
+            )
+            .order_by(Task.lease_until.asc(), Task.priority.desc(), Task.id.asc())
+            .limit(limit)
+        )
+        leases: list[ExpiredTaskLease] = []
+        for row in rows:
+            if row.locked_by is None or row.lock_token is None or row.lease_until is None:
+                continue
+            leases.append(
+                ExpiredTaskLease(
+                    task_id=row.id,
+                    status=row.status,
+                    worker_id=row.locked_by,
+                    lock_token=row.lock_token,
+                    lease_until=row.lease_until,
+                )
+            )
+        return leases
+
+    def recover_expired_lease(
+        self,
+        lease: ExpiredTaskLease,
+        *,
+        next_attempt_at: datetime | None = None,
+        recovered_at: datetime | None = None,
+    ) -> RecoveredTaskLease | None:
+        now = recovered_at or self._clock()
+        current = self._session.execute(
+            select(
+                Task.status,
+                Task.retry_count,
+                Task.max_retries,
+            ).where(
+                Task.id == lease.task_id,
+                Task.status == lease.status,
+                Task.locked_by == lease.worker_id,
+                Task.lock_token == lease.lock_token,
+                Task.lease_until <= now,
+            )
+        ).one_or_none()
+        if current is None:
+            return None
+
+        retry_count = current.retry_count + 1
+        if current.status == "cancel_requested":
+            target_status = "cancel_requested"
+            retry_at = None
+        elif retry_count > current.max_retries:
+            target_status = "failed"
+            retry_at = None
+        else:
+            if next_attempt_at is None:
+                raise ValueError(
+                    "next_attempt_at is required when an expired task remains retryable"
+                )
+            target_status = "retry"
+            retry_at = next_attempt_at
+
+        task_values = self._task_transition_values(
+            target_status=target_status,
+            occurred_at=now,
+            blocked_reason=None,
+            error_code=LEASE_EXPIRED_ERROR_CODE,
+            error_message=LEASE_EXPIRED_ERROR_MESSAGE,
+            next_attempt_at=retry_at,
+        )
+        if target_status == "cancel_requested":
+            task_values.pop("cancel_requested_at", None)
+        task_values.update(
+            {
+                "retry_count": retry_count,
+                "locked_by": None,
+                "lock_token": None,
+                "locked_at": None,
+                "lease_until": None,
+                "updated_at": now,
+            }
+        )
+
+        with self._session.begin_nested():
+            recovered_task_id = self._session.scalar(
+                update(Task)
+                .where(
+                    Task.id == lease.task_id,
+                    Task.status == lease.status,
+                    Task.locked_by == lease.worker_id,
+                    Task.lock_token == lease.lock_token,
+                    Task.lease_until <= now,
+                )
+                .values(**task_values)
+                .returning(Task.id)
+                .execution_options(synchronize_session=False)
+            )
+            if recovered_task_id is None:
+                return None
+
+            recovered_run_id = self._mark_task_run_lost(
+                task_id=lease.task_id,
+                worker_id=lease.worker_id,
+                lock_token=lease.lock_token,
+                recovered_at=now,
+            )
+            if recovered_run_id is None:
+                raise TaskRunNotFoundError(
+                    f"active task run not found for expired task {lease.task_id}"
+                )
+
+        return RecoveredTaskLease(
+            task=self._require_task(recovered_task_id, populate_existing=True),
+            task_run=self._require_task_run(
+                recovered_run_id,
+                populate_existing=True,
+            ),
+            previous_lock_token=lease.lock_token,
+        )
+
     def _require_task(self, task_id: int, *, populate_existing: bool = False) -> Task:
         if populate_existing:
             task = self._session.scalar(
@@ -444,6 +624,34 @@ class TaskRepository:
         self._session.add(task_run)
         self._session.flush()
         return task_run
+
+    def _mark_task_run_lost(
+        self,
+        *,
+        task_id: int,
+        worker_id: str,
+        lock_token: str,
+        recovered_at: datetime,
+    ) -> int | None:
+        return self._session.scalar(
+            update(TaskRun)
+            .where(
+                TaskRun.task_id == task_id,
+                TaskRun.status == "running",
+                TaskRun.worker_id == worker_id,
+                TaskRun.lock_token == lock_token,
+            )
+            .values(
+                status="lost",
+                finished_at=recovered_at,
+                result_summary=LEASE_EXPIRED_ERROR_MESSAGE,
+                error_code=LEASE_EXPIRED_ERROR_CODE,
+                error_message=LEASE_EXPIRED_ERROR_MESSAGE,
+                updated_at=recovered_at,
+            )
+            .returning(TaskRun.id)
+            .execution_options(synchronize_session=False)
+        )
 
     @staticmethod
     def _validate_owner_arguments(worker_id: str, lease_duration: timedelta) -> None:
