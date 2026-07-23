@@ -32,12 +32,26 @@ def test_task_idempotency_key_is_unique(db: Session) -> None:
 
 
 def test_task_payload_version_defaults_to_one(db: Session) -> None:
-    task = Task(type="scan")
+    task = Task(type="scan", payload={"subscription_id": 42})
     db.add(task)
     db.commit()
 
     assert task.payload_version == 1
-    assert task.payload == {}
+    assert task.payload == {"subscription_id": 42}
+
+    task.payload_version = 2
+    with pytest.raises(IntegrityError, match="task payload and version are immutable"):
+        db.commit()
+
+
+def test_task_idempotency_key_is_immutable_once_assigned(db: Session) -> None:
+    task = Task(type="scan", idempotency_key="scan:42:scheduled")
+    db.add(task)
+    db.commit()
+
+    task.idempotency_key = "scan:42:rewritten"
+    with pytest.raises(IntegrityError, match="task idempotency key is immutable"):
+        db.commit()
 
 
 def test_task_ownership_fields_must_be_complete(db: Session) -> None:
@@ -60,6 +74,24 @@ def test_task_run_number_is_unique_per_task(db: Session) -> None:
     )
 
     with pytest.raises(IntegrityError):
+        db.commit()
+
+
+def test_active_task_run_identity_is_immutable(db: Session) -> None:
+    task = Task(type="scan")
+    db.add(task)
+    db.flush()
+    task_run = TaskRun(
+        task_id=task.id,
+        run_number=1,
+        status="running",
+        started_at=utcnow(),
+    )
+    db.add(task_run)
+    db.commit()
+
+    task_run.run_number = 2
+    with pytest.raises(IntegrityError, match="task run identity is immutable"):
         db.commit()
 
 

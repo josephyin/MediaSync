@@ -160,6 +160,54 @@ class TaskRun(TimestampMixin, Base):
 
 
 event.listen(
+    Task.__table__,
+    "after_create",
+    DDL(
+        """
+        CREATE TRIGGER trg_tasks_payload_immutable
+        BEFORE UPDATE OF payload, payload_version ON tasks
+        FOR EACH ROW
+        WHEN NEW.payload IS NOT OLD.payload
+            OR NEW.payload_version IS NOT OLD.payload_version
+        BEGIN
+            SELECT RAISE(ABORT, 'task payload and version are immutable');
+        END
+        """
+    ).execute_if(dialect="sqlite"),
+)
+event.listen(
+    Task.__table__,
+    "after_create",
+    DDL(
+        """
+        CREATE TRIGGER trg_tasks_idempotency_key_immutable
+        BEFORE UPDATE OF idempotency_key ON tasks
+        FOR EACH ROW
+        WHEN OLD.idempotency_key IS NOT NULL
+            AND NEW.idempotency_key IS NOT OLD.idempotency_key
+        BEGIN
+            SELECT RAISE(ABORT, 'task idempotency key is immutable once assigned');
+        END
+        """
+    ).execute_if(dialect="sqlite"),
+)
+event.listen(
+    TaskRun.__table__,
+    "after_create",
+    DDL(
+        """
+        CREATE TRIGGER trg_task_runs_identity_immutable
+        BEFORE UPDATE OF task_id, run_number ON task_runs
+        FOR EACH ROW
+        WHEN NEW.task_id IS NOT OLD.task_id
+            OR NEW.run_number IS NOT OLD.run_number
+        BEGIN
+            SELECT RAISE(ABORT, 'task run identity is immutable');
+        END
+        """
+    ).execute_if(dialect="sqlite"),
+)
+event.listen(
     TaskRun.__table__,
     "after_create",
     DDL(

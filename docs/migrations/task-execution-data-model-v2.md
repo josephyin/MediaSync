@@ -33,6 +33,10 @@ that records the latest v0.1 outcome. v0.1 did not retain every individual
 attempt, so the migration cannot reconstruct attempts that were previously
 overwritten.
 
+SQLite data guards make Task payload/version, assigned idempotency keys, and
+Task Run identity immutable. Terminal Task Runs cannot be updated, and Task
+Run history cannot be deleted through normal database operations.
+
 ## Rollback and restore
 
 `alembic downgrade 0005_folder_checkpoints` removes `task_runs` and all Task

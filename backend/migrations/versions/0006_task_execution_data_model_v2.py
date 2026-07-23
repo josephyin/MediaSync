@@ -269,6 +269,42 @@ def upgrade() -> None:
     if op.get_bind().dialect.name == "sqlite":
         op.execute(
             """
+            CREATE TRIGGER trg_tasks_payload_immutable
+            BEFORE UPDATE OF payload, payload_version ON tasks
+            FOR EACH ROW
+            WHEN NEW.payload IS NOT OLD.payload
+                OR NEW.payload_version IS NOT OLD.payload_version
+            BEGIN
+                SELECT RAISE(ABORT, 'task payload and version are immutable');
+            END
+            """
+        )
+        op.execute(
+            """
+            CREATE TRIGGER trg_tasks_idempotency_key_immutable
+            BEFORE UPDATE OF idempotency_key ON tasks
+            FOR EACH ROW
+            WHEN OLD.idempotency_key IS NOT NULL
+                AND NEW.idempotency_key IS NOT OLD.idempotency_key
+            BEGIN
+                SELECT RAISE(ABORT, 'task idempotency key is immutable once assigned');
+            END
+            """
+        )
+        op.execute(
+            """
+            CREATE TRIGGER trg_task_runs_identity_immutable
+            BEFORE UPDATE OF task_id, run_number ON task_runs
+            FOR EACH ROW
+            WHEN NEW.task_id IS NOT OLD.task_id
+                OR NEW.run_number IS NOT OLD.run_number
+            BEGIN
+                SELECT RAISE(ABORT, 'task run identity is immutable');
+            END
+            """
+        )
+        op.execute(
+            """
             CREATE TRIGGER trg_task_runs_terminal_immutable
             BEFORE UPDATE ON task_runs
             FOR EACH ROW
@@ -294,6 +330,9 @@ def downgrade() -> None:
     if op.get_bind().dialect.name == "sqlite":
         op.execute("DROP TRIGGER IF EXISTS trg_task_runs_no_delete")
         op.execute("DROP TRIGGER IF EXISTS trg_task_runs_terminal_immutable")
+        op.execute("DROP TRIGGER IF EXISTS trg_task_runs_identity_immutable")
+        op.execute("DROP TRIGGER IF EXISTS trg_tasks_idempotency_key_immutable")
+        op.execute("DROP TRIGGER IF EXISTS trg_tasks_payload_immutable")
 
     op.drop_index("ix_task_runs_status_started", table_name="task_runs")
     op.drop_index("ix_task_runs_task_created", table_name="task_runs")
