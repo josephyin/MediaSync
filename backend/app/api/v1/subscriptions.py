@@ -134,13 +134,14 @@ def scan_subscription(
                 status_code=429,
                 detail=f"请等待 {int(remaining) + 1} 秒后再手动扫描",
             )
-    task = enqueue_manual_scan(
+    enqueue_result = enqueue_manual_scan(
         db,
         subscription,
         force_full=full,
     )
+    task = enqueue_result.task
     db.commit()
     db.refresh(task)
-    if _legacy_execution_enabled() and task.status == "pending":
+    if _legacy_execution_enabled() and enqueue_result.created:
         background_tasks.add_task(run_scan_by_id, subscription.id, "manual", full)
     return task

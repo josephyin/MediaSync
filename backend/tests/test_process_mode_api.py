@@ -142,6 +142,42 @@ def test_legacy_manual_scan_keeps_background_execution_path(
         assert len(background_tasks.tasks) == 1
 
 
+def test_repeated_legacy_manual_scan_does_not_duplicate_background_task(
+    sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        subscriptions_api,
+        "get_settings",
+        lambda: mode_settings("legacy"),
+    )
+    with sessions() as session, session.begin():
+        subscription, _file = seed_subscription_and_file(session)
+        subscription_id = subscription.id
+
+    first_background_tasks = BackgroundTasks()
+    second_background_tasks = BackgroundTasks()
+    with sessions() as session:
+        first = subscriptions_api.scan_subscription(
+            subscription_id=subscription_id,
+            background_tasks=first_background_tasks,
+            db=session,
+            _=None,  # type: ignore[arg-type]
+            full=False,
+        )
+        second = subscriptions_api.scan_subscription(
+            subscription_id=subscription_id,
+            background_tasks=second_background_tasks,
+            db=session,
+            _=None,  # type: ignore[arg-type]
+            full=True,
+        )
+
+        assert second.id == first.id
+        assert len(first_background_tasks.tasks) == 1
+        assert second_background_tasks.tasks == []
+
+
 def test_repeated_process_manual_scan_returns_active_task(
     sessions: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
@@ -173,16 +209,19 @@ def test_repeated_process_manual_scan_returns_active_task(
 
         assert second.id == first.id
         assert second.payload == {"force_full": False}
-        assert len(
-            list(
-                session.scalars(
-                    select(Task).where(
-                        Task.subscription_id == subscription_id,
-                        Task.type == "scan",
+        assert (
+            len(
+                list(
+                    session.scalars(
+                        select(Task).where(
+                            Task.subscription_id == subscription_id,
+                            Task.type == "scan",
+                        )
                     )
                 )
             )
-        ) == 1
+            == 1
+        )
 
 
 def test_process_mode_subscription_hooks_do_not_touch_apscheduler(
@@ -259,6 +298,4 @@ def test_file_retry_api_creates_successor_task(
         assert successor is not None
         assert successor.id != predecessor.id
         assert successor.status == "pending"
-        assert successor.idempotency_key == (
-            f"transfer-retry:{file_id}:{predecessor_id}"
-        )
+        assert successor.idempotency_key == (f"transfer-retry:{file_id}:{predecessor_id}")

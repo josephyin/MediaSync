@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import CloudFile, Subscription, Task
 from app.repositories import TaskRepository
 from app.task_engine import TERMINAL_TASK_STATUSES
+
+
+@dataclass(frozen=True, slots=True)
+class TaskEnqueueResult:
+    task: Task
+    created: bool
 
 
 def _active_task(
@@ -24,10 +32,7 @@ def _active_task(
     if file_id is not None:
         conditions.append(Task.file_id == file_id)
     return db.scalar(
-        select(Task)
-        .where(*conditions)
-        .order_by(Task.created_at.desc(), Task.id.desc())
-        .limit(1)
+        select(Task).where(*conditions).order_by(Task.created_at.desc(), Task.id.desc()).limit(1)
     )
 
 
@@ -36,24 +41,27 @@ def enqueue_manual_scan(
     subscription: Subscription,
     *,
     force_full: bool,
-) -> Task:
+) -> TaskEnqueueResult:
     existing = _active_task(
         db,
         task_type="scan",
         subscription_id=subscription.id,
     )
     if existing is not None:
-        return existing
-    return TaskRepository(db).create_task(
-        Task(
-            account_id=subscription.cloud_account_id,
-            subscription_id=subscription.id,
-            type="scan",
-            trigger_type="manual",
-            status="pending",
-            payload_version=1,
-            payload={"force_full": force_full},
-        )
+        return TaskEnqueueResult(task=existing, created=False)
+    return TaskEnqueueResult(
+        task=TaskRepository(db).create_task(
+            Task(
+                account_id=subscription.cloud_account_id,
+                subscription_id=subscription.id,
+                type="scan",
+                trigger_type="manual",
+                status="pending",
+                payload_version=1,
+                payload={"force_full": force_full},
+            )
+        ),
+        created=True,
     )
 
 

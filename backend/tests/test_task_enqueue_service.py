@@ -86,11 +86,12 @@ def test_manual_scan_enqueues_versioned_pending_task(
 ) -> None:
     with sessions() as session, session.begin():
         subscription, _file = seed_subscription_and_file(session)
-        task = enqueue_manual_scan(
+        result = enqueue_manual_scan(
             session,
             subscription,
             force_full=True,
         )
+        task = result.task
         task_id = task.id
         subscription_id = subscription.id
         account_id = subscription.cloud_account_id
@@ -105,6 +106,7 @@ def test_manual_scan_enqueues_versioned_pending_task(
         assert task.status == "pending"
         assert task.payload_version == 1
         assert task.payload == {"force_full": True}
+        assert result.created is True
 
 
 @pytest.mark.parametrize(
@@ -128,24 +130,29 @@ def test_manual_scan_returns_existing_non_terminal_task(
         session.add(existing)
         session.flush()
 
-        returned = enqueue_manual_scan(
+        result = enqueue_manual_scan(
             session,
             subscription,
             force_full=True,
         )
+        returned = result.task
 
         assert returned.id == existing.id
         assert returned.payload == {"force_full": False}
-        assert len(
-            list(
-                session.scalars(
-                    select(Task).where(
-                        Task.subscription_id == subscription.id,
-                        Task.type == "scan",
+        assert result.created is False
+        assert (
+            len(
+                list(
+                    session.scalars(
+                        select(Task).where(
+                            Task.subscription_id == subscription.id,
+                            Task.type == "scan",
+                        )
                     )
                 )
             )
-        ) == 1
+            == 1
+        )
 
 
 def test_transfer_retry_creates_successor_without_mutating_terminal_history(
@@ -211,9 +218,7 @@ def test_transfer_retry_creates_successor_without_mutating_terminal_history(
         assert successor.trigger_type == "retry"
         assert successor.payload_version == 1
         assert successor.payload == {}
-        assert successor.idempotency_key == (
-            f"transfer-retry:{file_id}:{predecessor_id}"
-        )
+        assert successor.idempotency_key == (f"transfer-retry:{file_id}:{predecessor_id}")
         assert file is not None
         assert file.status == "pending"
         assert file.last_error is None
@@ -228,16 +233,19 @@ def test_repeated_transfer_retry_returns_active_successor(
         second = enqueue_transfer_retry(session, file)
 
         assert second.id == first.id
-        assert len(
-            list(
-                session.scalars(
-                    select(Task).where(
-                        Task.file_id == file.id,
-                        Task.type == "transfer",
+        assert (
+            len(
+                list(
+                    session.scalars(
+                        select(Task).where(
+                            Task.file_id == file.id,
+                            Task.type == "transfer",
+                        )
                     )
                 )
             )
-        ) == 1
+            == 1
+        )
 
 
 def test_active_transfer_is_returned_without_rewriting_file_state(
