@@ -3,14 +3,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.v1 import files as files_api
 from app.api.v1 import subscriptions as subscriptions_api
 from app.core.config import Settings
-from app.models import Base, CloudAccount, CloudFile, Subscription, Task
+from app.models import Base, CloudAccount, CloudFile, Subscription, Task, TaskRun
 
 NOW = datetime(2026, 7, 24, 15, 0, tzinfo=UTC)
 
@@ -80,6 +80,101 @@ def seed_subscription_and_file(
     session.add(file)
     session.flush()
     return subscription, file
+
+
+def test_delete_subscription_preserves_terminal_task_run_history(
+    sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        subscriptions_api,
+        "_remove_legacy_subscription_job",
+        lambda _subscription_id: None,
+    )
+    with sessions() as session, session.begin():
+        subscription, file = seed_subscription_and_file(session)
+        task = Task(
+            account_id=subscription.cloud_account_id,
+            subscription_id=subscription.id,
+            file_id=file.id,
+            type="transfer",
+            status="success",
+            completed_at=NOW,
+        )
+        session.add(task)
+        session.flush()
+        run = TaskRun(
+            task_id=task.id,
+            run_number=1,
+            worker_id="worker-delete-test",
+            lock_token="delete-test-token",
+            status="success",
+            started_at=NOW,
+            finished_at=NOW,
+            result_summary="转存成功",
+        )
+        session.add(run)
+        session.flush()
+        subscription_id = subscription.id
+        file_id = file.id
+        task_id = task.id
+        run_id = run.id
+
+    with sessions() as session:
+        response = subscriptions_api.delete_subscription(
+            subscription_id=subscription_id,
+            db=session,
+            _=None,  # type: ignore[arg-type]
+        )
+
+    assert response.message == "订阅已删除，Task 执行历史和云盘目标文件已保留"
+    with sessions() as session:
+        assert session.get(Subscription, subscription_id) is None
+        assert session.get(CloudFile, file_id) is None
+        preserved_task = session.get(Task, task_id)
+        assert preserved_task is not None
+        assert preserved_task.subscription_id is None
+        assert preserved_task.file_id is None
+        assert session.get(TaskRun, run_id) is not None
+
+
+def test_delete_subscription_rejects_active_task(
+    sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        subscriptions_api,
+        "_remove_legacy_subscription_job",
+        lambda _subscription_id: None,
+    )
+    with sessions() as session, session.begin():
+        subscription, file = seed_subscription_and_file(session)
+        task = Task(
+            account_id=subscription.cloud_account_id,
+            subscription_id=subscription.id,
+            file_id=file.id,
+            type="transfer",
+            status="retry",
+        )
+        session.add(task)
+        session.flush()
+        subscription_id = subscription.id
+        file_id = file.id
+        task_id = task.id
+
+    with sessions() as session, pytest.raises(HTTPException) as exc_info:
+        subscriptions_api.delete_subscription(
+            subscription_id=subscription_id,
+            db=session,
+            _=None,  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "订阅仍有活动任务，请先停用订阅并等待任务结束后再删除"
+    with sessions() as session:
+        assert session.get(Subscription, subscription_id) is not None
+        assert session.get(CloudFile, file_id) is not None
+        assert session.get(Task, task_id) is not None
 
 
 def test_process_manual_scan_enqueues_without_background_task(
