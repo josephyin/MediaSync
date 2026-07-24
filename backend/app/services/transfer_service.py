@@ -1,6 +1,5 @@
 import random
 from datetime import timedelta
-from pathlib import PurePosixPath
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -9,18 +8,22 @@ from app.core.config import get_settings
 from app.models import Task
 from app.models.base import utcnow
 from app.providers import get_provider
-from app.providers.base import FolderRef, RemoteItem
+from app.providers.base import CloudDriveProvider, FolderRef
 from app.services.account_service import get_decrypted_token, persist_provider_token
 from app.services.subscription_service import decrypt_share_password
+from app.services.transfer_operation import (
+    TransferSpec,
+    ensure_target_folder,
+    execute_transfer,
+)
 
 
-async def _target_folder(provider: object, root_path: str, relative_path: str) -> FolderRef:
-    target = FolderRef(folder_id="root", path="/")
-    full_path = PurePosixPath(root_path) / PurePosixPath(relative_path).parent
-    for part in full_path.parts:
-        if part not in {"", ".", "/"}:
-            target = await provider.ensure_folder(target, part)  # type: ignore[attr-defined]
-    return target
+async def _target_folder(
+    provider: CloudDriveProvider,
+    root_path: str,
+    relative_path: str,
+) -> FolderRef:
+    return await ensure_target_folder(provider, root_path, relative_path)
 
 
 async def run_transfer(db: Session, task: Task) -> None:
@@ -47,36 +50,31 @@ async def run_transfer(db: Session, task: Task) -> None:
             get_decrypted_token(account),
             subscription.target_drive_id,
         )
-        share = await provider.resolve_share(
-            subscription.share_url, decrypt_share_password(subscription)
-        )
-        target = await _target_folder(provider, subscription.target_path, file.relative_path)
-        existing = await provider.find_target_item(target, file.filename)
-        if existing:
-            target_file_id = existing.remote_file_id
-            target_path = str(PurePosixPath(target.path) / file.filename)
-        else:
-            source = RemoteItem(
+        result = await execute_transfer(
+            provider,
+            TransferSpec(
+                share_url=subscription.share_url,
+                share_password=decrypt_share_password(subscription),
+                target_path=subscription.target_path,
                 remote_file_id=file.remote_file_id,
-                parent_id=file.parent_remote_file_id,
+                parent_remote_file_id=file.parent_remote_file_id,
                 filename=file.filename,
+                relative_path=file.relative_path,
                 item_type=file.item_type,
                 size=file.size,
                 content_hash=file.content_hash,
-            )
-            result = await provider.save_shared_item(share, source, target)
-            target_file_id = result.target_file_id
-            target_path = result.target_path
+            ),
+        )
         now = utcnow()
         file.status = "saved"
-        file.target_file_id = target_file_id
-        file.target_path = target_path
+        file.target_file_id = result.target_file_id
+        file.target_path = result.target_path
         file.saved_at = now
         file.last_error = None
         task.status = "success"
         request_count = getattr(provider, "request_count", None)
         request_summary = f"，API 请求 {request_count} 次" if request_count is not None else ""
-        task.message = f"已转存至 {target_path}{request_summary}"
+        task.message = f"已转存至 {result.target_path}{request_summary}"
         task.finished_at = now
         task.next_attempt_at = None
     except Exception as exc:
