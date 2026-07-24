@@ -168,6 +168,10 @@ async def test_explicit_worker_command_processes_a_queued_task(
     await run_worker(
         runtime=runtime,
         config=config,
+        settings=Settings(
+            _env_file=None,
+            background_execution_mode="process",
+        ),
         worker_id="worker-process-test",
         stop=stop,
         install_signal_handlers=False,

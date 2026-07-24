@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +23,7 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = Field(default="admin", min_length=5)
     session_max_age_seconds: int = 86400
+    background_execution_mode: Literal["legacy", "process"] = "legacy"
     scheduler_enabled: bool = True
     scheduler_poll_seconds: float = Field(default=10, gt=0, le=300)
     scheduler_batch_size: int = Field(default=100, ge=1, le=1000)

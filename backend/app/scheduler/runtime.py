@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.execution import (
+    BackgroundExecutionModeError,
+    require_background_execution_mode,
+)
 from app.core.process import install_shutdown_signal_handlers
 from app.models.base import utcnow
 from app.scheduler.enqueue import (
@@ -132,14 +136,26 @@ async def run_scheduler(
     *,
     runtime: SchedulerRuntime | None = None,
     config: SchedulerProcessConfig | None = None,
+    settings: Settings | None = None,
     stop: asyncio.Event | None = None,
     install_signal_handlers: bool = True,
 ) -> None:
+    resolved_settings = settings or get_settings()
+    logger.info(
+        "background_execution_mode_selected process=scheduler mode=%s",
+        resolved_settings.background_execution_mode,
+    )
+    require_background_execution_mode(
+        resolved_settings,
+        process_name="scheduler",
+        expected_mode="process",
+    )
+
     if runtime is None:
-        runtime, built_config = build_scheduler_runtime()
+        runtime, built_config = build_scheduler_runtime(settings=resolved_settings)
         config = config or built_config
     if config is None:
-        config = SchedulerProcessConfig.from_settings(get_settings())
+        config = SchedulerProcessConfig.from_settings(resolved_settings)
 
     stop_event = stop or asyncio.Event()
 
@@ -172,4 +188,13 @@ def main() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    asyncio.run(run_scheduler())
+    try:
+        asyncio.run(run_scheduler(settings=settings))
+    except BackgroundExecutionModeError as exc:
+        logger.error(
+            "process_start_refused process=%s expected_mode=%s actual_mode=%s",
+            exc.process_name,
+            exc.expected_mode,
+            exc.actual_mode,
+        )
+        raise SystemExit(2) from None

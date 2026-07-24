@@ -306,6 +306,10 @@ async def test_run_scheduler_delegates_lifecycle_and_logs(
             poll_interval=timedelta(seconds=1),
             batch_size=10,
         ),
+        settings=Settings(
+            _env_file=None,
+            background_execution_mode="process",
+        ),
         stop=stop,
         install_signal_handlers=False,
     )
