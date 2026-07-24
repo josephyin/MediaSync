@@ -12,6 +12,10 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.execution import (
+    BackgroundExecutionModeError,
+    require_background_execution_mode,
+)
 from app.core.process import install_shutdown_signal_handlers
 from app.task_engine.handlers import TaskHandlerRegistry
 from app.task_engine.scan_handler import ScanTaskHandler
@@ -126,16 +130,31 @@ async def run_worker(
     *,
     runtime: WorkerRuntime | None = None,
     config: WorkerProcessConfig | None = None,
+    settings: Settings | None = None,
     worker_id: str | None = None,
     stop: asyncio.Event | None = None,
     install_signal_handlers: bool = True,
 ) -> None:
+    resolved_settings = settings or get_settings()
+    logger.info(
+        "background_execution_mode_selected process=worker mode=%s",
+        resolved_settings.background_execution_mode,
+    )
+    require_background_execution_mode(
+        resolved_settings,
+        process_name="worker",
+        expected_mode="process",
+    )
+
     resolved_worker_id = worker_id or generate_worker_id()
     if runtime is None:
-        runtime, built_config = build_worker_runtime(worker_id=resolved_worker_id)
+        runtime, built_config = build_worker_runtime(
+            settings=resolved_settings,
+            worker_id=resolved_worker_id,
+        )
         config = config or built_config
     if config is None:
-        config = WorkerProcessConfig.from_settings(get_settings())
+        config = WorkerProcessConfig.from_settings(resolved_settings)
 
     stop_event = stop or asyncio.Event()
 
@@ -167,7 +186,16 @@ def main() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    asyncio.run(run_worker())
+    try:
+        asyncio.run(run_worker(settings=settings))
+    except BackgroundExecutionModeError as exc:
+        logger.error(
+            "process_start_refused process=%s expected_mode=%s actual_mode=%s",
+            exc.process_name,
+            exc.expected_mode,
+            exc.actual_mode,
+        )
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":
