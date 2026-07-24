@@ -2,8 +2,9 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import and_, case, func, not_, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.base import utcnow
@@ -15,6 +16,10 @@ CLAIMABLE_TASK_STATUSES = (*QUEUE_TASK_STATUSES, "cancel_requested")
 LEASED_TASK_STATUSES = ("running", "cancel_requested")
 LEASE_EXPIRED_ERROR_CODE = "WORKER_LEASE_EXPIRED"
 LEASE_EXPIRED_ERROR_MESSAGE = "worker lease expired before task completion"
+LEGACY_CUTOVER_ERROR_CODE = "LEGACY_CUTOVER_RECOVERY"
+LEGACY_CUTOVER_ERROR_MESSAGE = (
+    "legacy execution stopped during process cutover; remote outcome is unknown"
+)
 TASK_TO_RUN_TERMINAL_STATUS = {
     "success": "success",
     "failed": "failed",
@@ -57,6 +62,10 @@ class TaskOwnershipLostError(RuntimeError):
         super().__init__(f"worker {worker_id!r} does not own active task {task_id}")
 
 
+class LegacyTaskRunConflictError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class TaskClaim:
     task: Task
@@ -80,6 +89,13 @@ class RecoveredTaskLease:
     task: Task
     task_run: TaskRun
     previous_lock_token: str
+
+
+@dataclass(frozen=True)
+class ReconciledLegacyTask:
+    task: Task
+    task_run: TaskRun
+    run_action: Literal["appended", "finalized", "preserved"]
 
 
 class TaskRepository:
@@ -597,6 +613,168 @@ class TaskRepository:
             previous_lock_token=lease.lock_token,
         )
 
+    def reconcile_legacy_orphan(
+        self,
+        task_id: int,
+        *,
+        next_attempt_at: datetime,
+        reconciled_at: datetime | None = None,
+    ) -> ReconciledLegacyTask | None:
+        now = reconciled_at or self._clock()
+        task = self._require_task(task_id)
+        if task.status != "running":
+            return None
+        ownership_is_complete = all(
+            value is not None
+            for value in (
+                task.locked_by,
+                task.lock_token,
+                task.locked_at,
+                task.lease_until,
+            )
+        )
+        if ownership_is_complete:
+            return None
+
+        retry_count = max(task.retry_count, task.attempt_count, 1)
+        target_status = "retry" if retry_count <= task.max_retries else "failed"
+        active_runs = list(
+            self._session.scalars(
+                select(TaskRun)
+                .where(
+                    TaskRun.task_id == task_id,
+                    TaskRun.status == "running",
+                )
+                .order_by(TaskRun.run_number.asc(), TaskRun.id.asc())
+            )
+        )
+        if len(active_runs) > 1:
+            raise LegacyTaskRunConflictError(
+                f"legacy task {task_id} has multiple active task runs"
+            )
+        equivalent_run = self._session.scalar(
+            select(TaskRun)
+            .where(
+                TaskRun.task_id == task_id,
+                TaskRun.status == "lost",
+                TaskRun.error_code == LEGACY_CUTOVER_ERROR_CODE,
+            )
+            .order_by(TaskRun.run_number.desc(), TaskRun.id.desc())
+            .limit(1)
+        )
+        if active_runs and equivalent_run is not None:
+            raise LegacyTaskRunConflictError(
+                f"legacy task {task_id} has both an active run and a cutover record"
+            )
+
+        ownership_is_incomplete = not_(
+            and_(
+                Task.locked_by.is_not(None),
+                Task.lock_token.is_not(None),
+                Task.locked_at.is_not(None),
+                Task.lease_until.is_not(None),
+            )
+        )
+        task_values: dict[str, object | None] = {
+            "status": target_status,
+            "retry_count": retry_count,
+            "next_attempt_at": next_attempt_at if target_status == "retry" else None,
+            "last_error_code": LEGACY_CUTOVER_ERROR_CODE,
+            "last_error_message": LEGACY_CUTOVER_ERROR_MESSAGE,
+            "completed_at": now if target_status == "failed" else None,
+            "locked_by": None,
+            "lock_token": None,
+            "locked_at": None,
+            "lease_until": None,
+            "updated_at": now,
+        }
+
+        with self._session.begin_nested():
+            reconciled_task_id = self._session.scalar(
+                update(Task)
+                .where(
+                    Task.id == task_id,
+                    Task.status == "running",
+                    ownership_is_incomplete,
+                )
+                .values(**task_values)
+                .returning(Task.id)
+                .execution_options(synchronize_session=False)
+            )
+            if reconciled_task_id is None:
+                return None
+
+            if active_runs:
+                active_run = active_runs[0]
+                reconciled_run_id = self._session.scalar(
+                    update(TaskRun)
+                    .where(
+                        TaskRun.id == active_run.id,
+                        TaskRun.status == "running",
+                    )
+                    .values(
+                        status="lost",
+                        finished_at=now,
+                        duration_ms=self._duration_ms(active_run.started_at, now),
+                        result_summary=LEGACY_CUTOVER_ERROR_MESSAGE,
+                        error_code=LEGACY_CUTOVER_ERROR_CODE,
+                        error_message=LEGACY_CUTOVER_ERROR_MESSAGE,
+                        updated_at=now,
+                    )
+                    .returning(TaskRun.id)
+                    .execution_options(synchronize_session=False)
+                )
+                if reconciled_run_id is None:
+                    raise TaskRunNotFoundError(
+                        f"active task run {active_run.id} disappeared during cutover"
+                    )
+                run_action: Literal["appended", "finalized", "preserved"] = "finalized"
+            elif equivalent_run is not None:
+                reconciled_run_id = equivalent_run.id
+                run_action = "preserved"
+            else:
+                next_run_number = (
+                    self._session.scalar(
+                        select(func.coalesce(func.max(TaskRun.run_number), 0)).where(
+                            TaskRun.task_id == task_id
+                        )
+                    )
+                    or 0
+                ) + 1
+                synthetic_run = TaskRun(
+                    task_id=task_id,
+                    run_number=next_run_number,
+                    worker_id="legacy-cutover",
+                    lock_token=None,
+                    status="lost",
+                    started_at=task.started_at or task.created_at or now,
+                    finished_at=now,
+                    duration_ms=self._duration_ms(
+                        task.started_at or task.created_at or now,
+                        now,
+                    ),
+                    result_summary=LEGACY_CUTOVER_ERROR_MESSAGE,
+                    error_code=LEGACY_CUTOVER_ERROR_CODE,
+                    error_message=LEGACY_CUTOVER_ERROR_MESSAGE,
+                    metrics={
+                        "schema_version": 1,
+                        "reconciled_from": "legacy",
+                    },
+                )
+                self._session.add(synthetic_run)
+                self._session.flush()
+                reconciled_run_id = synthetic_run.id
+                run_action = "appended"
+
+        return ReconciledLegacyTask(
+            task=self._require_task(reconciled_task_id, populate_existing=True),
+            task_run=self._require_task_run(
+                reconciled_run_id,
+                populate_existing=True,
+            ),
+            run_action=run_action,
+        )
+
     def _require_task(self, task_id: int, *, populate_existing: bool = False) -> Task:
         if populate_existing:
             task = self._session.scalar(
@@ -662,6 +840,14 @@ class TaskRepository:
             .returning(TaskRun.id)
             .execution_options(synchronize_session=False)
         )
+
+    @staticmethod
+    def _duration_ms(started_at: datetime, finished_at: datetime) -> int:
+        if started_at.tzinfo is None and finished_at.tzinfo is not None:
+            finished_at = finished_at.replace(tzinfo=None)
+        elif started_at.tzinfo is not None and finished_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=None)
+        return max(0, int((finished_at - started_at).total_seconds() * 1000))
 
     @staticmethod
     def _validate_owner_arguments(worker_id: str, lease_duration: timedelta) -> None:

@@ -8,9 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.database import engine
 from app.core.exceptions import MediaSyncError
-from app.models import Base
 from app.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
@@ -27,7 +25,6 @@ async def lifespan(_: FastAPI):
         "background_execution_mode_selected process=api mode=%s",
         settings.background_execution_mode,
     )
-    Base.metadata.create_all(bind=engine)
     legacy_mode = settings.background_execution_mode == "legacy"
     if legacy_mode:
         start_scheduler()
