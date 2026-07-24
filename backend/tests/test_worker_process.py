@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app import worker as worker_module
 from app.core.config import Settings
+from app.core.process import install_shutdown_signal_handlers
 from app.models import Base, Task
 from app.repositories import TaskRepository
 from app.task_engine import TaskExecutionContext, TaskHandlerRegistry, TaskOutcome
@@ -20,7 +21,6 @@ from app.task_engine.transfer_handler import TransferTaskHandler
 from app.task_engine.worker import WorkerCycleResult, WorkerRuntime
 from app.worker import (
     WorkerProcessConfig,
-    _install_signal_handlers,
     _log_cycle,
     build_handler_registry,
     generate_worker_id,
@@ -127,7 +127,12 @@ async def test_signal_handler_requests_graceful_stop(
         lambda process_signal: removed.append(process_signal) or True,
     )
 
-    cleanup = _install_signal_handlers(stop, loop=loop)
+    cleanup = install_shutdown_signal_handlers(
+        stop,
+        logger=worker_module.logger,
+        process_name="worker",
+        loop=loop,
+    )
     callback, args = callbacks[signal.SIGTERM]
     callback(*args)  # type: ignore[operator]
 

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     admin_password: str = Field(default="admin", min_length=5)
     session_max_age_seconds: int = 86400
     scheduler_enabled: bool = True
+    scheduler_poll_seconds: float = Field(default=10, gt=0, le=300)
+    scheduler_batch_size: int = Field(default=100, ge=1, le=1000)
     transfer_poll_seconds: int = 10
     transfer_batch_size: int = 2
     transfer_retry_base_seconds: int = Field(default=30, ge=5, le=3600)

@@ -3,17 +3,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import socket
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from types import FrameType
 
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.process import install_shutdown_signal_handlers
 from app.task_engine.handlers import TaskHandlerRegistry
 from app.task_engine.scan_handler import ScanTaskHandler
 from app.task_engine.transfer_handler import TransferTaskHandler
@@ -26,7 +25,6 @@ from app.task_engine.worker import (
 logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
-SignalCleanup = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -102,52 +100,6 @@ def build_worker_runtime(
     return runtime, config
 
 
-def _install_signal_handlers(
-    stop: asyncio.Event,
-    *,
-    loop: asyncio.AbstractEventLoop | None = None,
-) -> SignalCleanup:
-    event_loop = loop or asyncio.get_running_loop()
-    installed_on_loop: list[signal.Signals] = []
-    previous_handlers: dict[
-        signal.Signals,
-        signal.Handlers,
-    ] = {}
-
-    def request_stop(signal_name: str) -> None:
-        logger.info("worker_stop_requested signal=%s", signal_name)
-        stop.set()
-
-    for process_signal in (signal.SIGTERM, signal.SIGINT):
-        try:
-            event_loop.add_signal_handler(
-                process_signal,
-                request_stop,
-                process_signal.name,
-            )
-            installed_on_loop.append(process_signal)
-        except (NotImplementedError, RuntimeError):
-            previous_handlers[process_signal] = signal.getsignal(process_signal)
-
-            def fallback_handler(
-                _signum: int,
-                _frame: FrameType | None,
-                *,
-                signal_name: str = process_signal.name,
-            ) -> None:
-                request_stop(signal_name)
-
-            signal.signal(process_signal, fallback_handler)
-
-    def cleanup() -> None:
-        for process_signal in installed_on_loop:
-            event_loop.remove_signal_handler(process_signal)
-        for process_signal, previous_handler in previous_handlers.items():
-            signal.signal(process_signal, previous_handler)
-
-    return cleanup
-
-
 def _log_cycle(worker_id: str, result: WorkerCycleResult) -> None:
     if result.recovered_count:
         logger.info(
@@ -191,7 +143,11 @@ async def run_worker(
         pass
 
     if install_signal_handlers:
-        cleanup_signals = _install_signal_handlers(stop_event)
+        cleanup_signals = install_shutdown_signal_handlers(
+            stop_event,
+            logger=logger,
+            process_name="worker",
+        )
 
     logger.info("worker_started worker_id=%s", resolved_worker_id)
     try:
