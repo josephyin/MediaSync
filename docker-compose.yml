@@ -1,7 +1,7 @@
 x-mediasync-backend: &mediasync-backend
   build:
     context: ./backend
-  image: mediasync-backend:${MEDIASYNC_IMAGE_TAG:-local}
+  image: ${MEDIASYNC_BACKEND_IMAGE:-mediasync-backend}:${MEDIASYNC_IMAGE_TAG:-local}
   init: true
   environment:
     ENVIRONMENT: production
@@ -108,6 +108,7 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    image: ${MEDIASYNC_FRONTEND_IMAGE:-mediasync-frontend}:${MEDIASYNC_IMAGE_TAG:-local}
     restart: unless-stopped
     depends_on:
       mediasync-api:

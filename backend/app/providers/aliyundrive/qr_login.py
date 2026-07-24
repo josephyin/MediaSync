@@ -80,7 +80,7 @@ class AliyunDriveQrLogin:
             "Accept": "application/json, text/plain, */*",
             "Origin": "https://www.alipan.com",
             "Referer": "https://www.alipan.com/",
-            "User-Agent": "Mozilla/5.0 MediaSync/0.1",
+            "User-Agent": "Mozilla/5.0 MediaSync/0.2",
         }
         if self._http_client is None:
             # The passport endpoints bind the QR session to cookies. Reuse one

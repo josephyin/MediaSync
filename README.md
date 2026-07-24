@@ -15,7 +15,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前为 `v0.1.0` 开发版本。Web、数据库、扫描和任务框架已经建立；阿里云盘已实现账号校验、分享目录读取、个人盘目录操作和分享转存。默认使用 Web 私有接口实验模式，接口可能随上游更新失效，正式使用前仍需真实账号联调。
+> 当前版本为 `v0.2.0-rc.1`。该版本已经完成 API、Scheduler、Worker 进程拆分和 Task Engine v2 可靠性基础，但仍处于稳定性观察期。默认使用 Web 私有接口实验模式，接口可能随上游更新失效。
 
 ## MVP 功能
 
@@ -52,7 +52,20 @@ ADMIN_PASSWORD=强密码
 ALIYUNDRIVE_MODE=private_api
 ```
 
-启动：
+使用 GitHub Container Registry 中的预构建镜像：
+
+```dotenv
+MEDIASYNC_BACKEND_IMAGE=ghcr.io/josephyin/mediasync-backend
+MEDIASYNC_FRONTEND_IMAGE=ghcr.io/josephyin/mediasync-frontend
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.1
+```
+
+```bash
+docker compose pull
+docker compose up -d --no-build
+```
+
+也可以从当前源码构建：
 
 ```bash
 docker compose up -d --build
@@ -152,8 +165,10 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 ## 路线图
 
 - [x] 实现阿里云盘私有接口分享目录与分享转存链路
-- [ ] 使用真实账号完成端到端兼容性验证
-- [ ] 发布 `v0.1.0`
+- [x] 完成 `v0.1` 功能 MVP
+- [x] 发布 `v0.2.0-rc.1` 可靠性基础预发布版
+- [ ] 完成 v0.2 八周稳定性观察
+- [ ] 发布 `v0.2.0` 正式版
 - [ ] 夸克网盘 Provider
 - [ ] 115 Provider
 - [ ] OneDrive Provider
