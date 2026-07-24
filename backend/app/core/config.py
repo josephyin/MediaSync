@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     transfer_batch_size: int = 2
     transfer_retry_base_seconds: int = Field(default=30, ge=5, le=3600)
     transfer_retry_max_seconds: int = Field(default=900, ge=30, le=86400)
+    worker_poll_seconds: float = Field(default=1, gt=0, le=60)
+    worker_lease_seconds: int = Field(default=60, ge=5, le=3600)
+    worker_heartbeat_seconds: int = Field(default=20, ge=1, le=1800)
+    worker_recovery_batch_size: int = Field(default=100, ge=1, le=1000)
+    worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
+    worker_retry_max_seconds: int = Field(default=900, ge=1, le=86400)
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
     log_level: str = "INFO"
     aliyundrive_mode: str = "private_api"
@@ -45,6 +51,19 @@ class Settings(BaseSettings):
     manual_scan_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     folder_scan_batch_size: int = Field(default=20, ge=1, le=500)
     full_scan_interval_hours: int = Field(default=24, ge=1, le=720)
+
+    @model_validator(mode="after")
+    def validate_worker_settings(self) -> "Settings":
+        if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
+            raise ValueError(
+                "worker_heartbeat_seconds must be shorter than worker_lease_seconds"
+            )
+        if self.worker_retry_max_seconds < self.worker_retry_base_seconds:
+            raise ValueError(
+                "worker_retry_max_seconds must not be shorter than "
+                "worker_retry_base_seconds"
+            )
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
