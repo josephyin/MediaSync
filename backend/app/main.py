@@ -10,7 +10,6 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import MediaSyncError
-from app.core.execution import require_background_execution_mode
 from app.models import Base
 from app.scheduler import start_scheduler, stop_scheduler
 
@@ -28,15 +27,15 @@ async def lifespan(_: FastAPI):
         "background_execution_mode_selected process=api mode=%s",
         settings.background_execution_mode,
     )
-    require_background_execution_mode(
-        settings,
-        process_name="api",
-        expected_mode="legacy",
-    )
     Base.metadata.create_all(bind=engine)
-    start_scheduler()
-    yield
-    stop_scheduler()
+    legacy_mode = settings.background_execution_mode == "legacy"
+    if legacy_mode:
+        start_scheduler()
+    try:
+        yield
+    finally:
+        if legacy_mode:
+            stop_scheduler()
 
 
 app = FastAPI(

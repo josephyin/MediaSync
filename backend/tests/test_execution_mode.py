@@ -100,6 +100,7 @@ async def test_api_legacy_startup_reports_selected_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     info_events: list[tuple[object, ...]] = []
+    scheduler_events: list[str] = []
     monkeypatch.setattr(main_module.settings, "background_execution_mode", "legacy")
     monkeypatch.setattr(
         main_module.logger,
@@ -111,8 +112,16 @@ async def test_api_legacy_startup_reports_selected_mode(
         "create_all",
         lambda **_kwargs: None,
     )
-    monkeypatch.setattr(main_module, "start_scheduler", lambda: None)
-    monkeypatch.setattr(main_module, "stop_scheduler", lambda: None)
+    monkeypatch.setattr(
+        main_module,
+        "start_scheduler",
+        lambda: scheduler_events.append("started"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "stop_scheduler",
+        lambda: scheduler_events.append("stopped"),
+    )
 
     async with main_module.lifespan(main_module.app):
         pass
@@ -121,22 +130,29 @@ async def test_api_legacy_startup_reports_selected_mode(
         "background_execution_mode_selected process=api mode=%s",
         "legacy",
     ) in info_events
+    assert scheduler_events == ["started", "stopped"]
 
 
-async def test_api_refuses_process_mode_before_database_or_scheduler_start(
+async def test_api_process_mode_starts_without_legacy_scheduler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(main_module.settings, "background_execution_mode", "process")
+    database_events: list[str] = []
 
-    def unexpected_call(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("API runtime side effect must not run in process mode yet")
+    def record_database_ready(*_args: object, **_kwargs: object) -> None:
+        database_events.append("ready")
 
-    monkeypatch.setattr(main_module.Base.metadata, "create_all", unexpected_call)
-    monkeypatch.setattr(main_module, "start_scheduler", unexpected_call)
+    def unexpected_scheduler_call() -> None:
+        raise AssertionError("legacy scheduler must not run in process mode")
 
-    with pytest.raises(BackgroundExecutionModeError):
-        async with main_module.lifespan(main_module.app):
-            pass
+    monkeypatch.setattr(main_module.Base.metadata, "create_all", record_database_ready)
+    monkeypatch.setattr(main_module, "start_scheduler", unexpected_scheduler_call)
+    monkeypatch.setattr(main_module, "stop_scheduler", unexpected_scheduler_call)
+
+    async with main_module.lifespan(main_module.app):
+        pass
+
+    assert database_events == ["ready"]
 
 
 def test_existing_api_still_starts_in_default_legacy_mode() -> None:
