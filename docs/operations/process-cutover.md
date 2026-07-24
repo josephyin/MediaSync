@@ -1,9 +1,8 @@
-# Process Cutover Operations
+# 进程拓扑切换运维手册
 
-This runbook applies when upgrading the official Docker Compose deployment from
-the legacy single-process executor to the v0.2 process topology.
+本手册用于把官方 Docker Compose 部署从旧版单进程执行器升级到 v0.2 进程拓扑。
 
-The supported topology is:
+受支持的拓扑为：
 
 ```text
 mediasync-migrate
@@ -20,50 +19,48 @@ mediasync-api  mediasync-scheduler  mediasync-worker
     frontend
 ```
 
-The SQLite profile supports exactly one Scheduler and one Worker. Do not use
-`docker compose up --scale` for either service.
+SQLite 方案只支持一个 Scheduler 和一个 Worker。不得对这两个服务执行
+`docker compose up --scale`。
 
-## Upgrade
+## 升级
 
-The cutover requires a maintenance window. Do not perform a rolling restart
-between the old and new topologies.
+切换过程需要维护窗口。新旧拓扑之间不得采用滚动重启。
 
-1. Stop the existing stack and verify that no manually started Scheduler or
-   Worker remains:
+1. 停止现有服务，并确认不存在手动启动的 Scheduler 或 Worker：
 
    ```bash
    docker compose stop
    docker compose ps -a
    ```
 
-2. Pull the new source and build the backend image without starting services:
+2. 拉取新代码并构建后端镜像，但暂不启动服务：
 
    ```bash
    git pull
    docker compose build mediasync-migrate
    ```
 
-3. Create a timestamped database backup inside the persistent volume:
+3. 在持久卷中创建带时间戳的数据库备份：
 
    ```bash
    docker compose run --rm --no-deps --entrypoint sh mediasync-migrate -c \
      'set -eu; stamp=$(date +%Y%m%d-%H%M%S); mkdir -p /data/backups/$stamp; cp -a /data/mediasync.db* /data/backups/$stamp/'
    ```
 
-   Record the application commit and current Alembic revision with the backup.
-   Copy the backup off the NAS volume before continuing when possible.
+   将应用提交和当前 Alembic 版本与备份一起记录。条件允许时，继续操作前应把
+   备份复制到 NAS 数据卷之外。
 
-4. Start the new topology:
+4. 启动新拓扑：
 
    ```bash
    docker compose up -d --build --remove-orphans
    ```
 
-   Compose runs `alembic upgrade head`, then `python -m app.reconcile`. API,
-   Scheduler, and Worker start only after both one-shot services exit with code
-   `0`.
+   Compose 会先执行 `alembic upgrade head`，再执行
+   `python -m app.reconcile`。只有两个一次性服务都以代码 `0` 退出后，API、
+   Scheduler 和 Worker 才会启动。
 
-5. Verify the barriers, services, and process-mode logs:
+5. 验证 barrier、服务状态和进程模式日志：
 
    ```bash
    docker compose ps -a
@@ -71,46 +68,41 @@ between the old and new topologies.
    docker compose logs mediasync-api mediasync-scheduler mediasync-worker
    ```
 
-   Expected results:
+   预期结果：
 
-   - `mediasync-migrate` and `mediasync-cutover` exited with code `0`;
-   - API, Scheduler, Worker, and frontend are running;
-   - API logs report `process=api mode=process`;
-   - Scheduler logs report `scheduler_started`;
-   - Worker logs report `worker_started`;
-   - no in-process APScheduler or legacy transfer-poller startup appears.
+   - `mediasync-migrate` 和 `mediasync-cutover` 以代码 `0` 退出；
+   - API、Scheduler、Worker 和 frontend 正在运行；
+   - API 日志包含 `process=api mode=process`；
+   - Scheduler 日志包含 `scheduler_started`；
+   - Worker 日志包含 `worker_started`；
+   - 不得出现进程内 APScheduler 或旧转存轮询器的启动日志。
 
-6. Trigger one manual scan and confirm that the API returns a durable task,
-   then confirm the Worker executes it. Confirm that one due subscription is
-   enqueued once by the Scheduler.
+6. 手动触发一次扫描，确认 API 返回持久化任务，随后确认 Worker 执行该任务。
+   同时确认 Scheduler 对一个到期订阅只创建一次任务。
 
-Retain the backup throughout the observation window.
+在整个观察期内保留备份。
 
-## Failure before normal processes start
+## 常驻进程启动前失败
 
-If migration or reconciliation fails, Compose keeps API, Scheduler, Worker,
-and frontend stopped.
+如果迁移或对账失败，Compose 会阻止 API、Scheduler、Worker 和 frontend 启动。
 
 ```bash
 docker compose logs mediasync-migrate mediasync-cutover
 docker compose down
 ```
 
-Correct the configuration or restore the backup before retrying. Do not bypass
-the failed one-shot service with a manual process start.
+修正配置或恢复备份后再重试。不得手动绕过失败的一次性服务来启动常驻进程。
 
-## Rollback
+## 回滚
 
-Before the v2 Worker executes any task, stop the stack and restore the
-pre-cutover backup, then run the previous compatibility-capable release in
-`legacy` mode.
+如果 v2 Worker 尚未执行任何任务，可以停止服务、恢复切换前备份，再以
+`legacy` 模式运行此前具备兼容能力的版本。
 
-After the v2 Worker executes a task, do not run a v0.1 binary directly against
-the v2 database. Either:
+如果 v2 Worker 已经执行过任务，不得让 v0.1 程序直接访问 v2 数据库。此时只能：
 
-1. run a compatibility-capable release in `legacy` mode against a schema that
-   release explicitly supports; or
-2. stop all services and restore the pre-cutover database backup.
+1. 对明确受该版本支持的数据库结构，以 `legacy` 模式运行具备兼容能力的版本；
+   或
+2. 停止全部服务并恢复切换前数据库备份。
 
-Restoring SQLite does not undo remote cloud-drive operations. Reconcile files
-saved after the backup before retrying transfers.
+恢复 SQLite 不会撤销远端云盘操作。重试转存前，必须先对备份后已保存的文件
+进行对账。

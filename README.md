@@ -1,6 +1,6 @@
 # MediaSync
 
-> Self-hosted cloud media synchronization service.
+> 自托管的云盘影音同步服务。
 
 MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检查资源分享目录，将新增文件自动转存到个人云盘，并可配合 OpenList、SmartStrm、MoviePilot、Emby、Jellyfin 和飞牛影视构建自动化影音库。
 
@@ -8,14 +8,14 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 资源分享 → MediaSync → 个人云盘 → STRM 生成 → 媒体库整理 → 播放器
 ```
 
-## Provider 支持
+## 云盘服务支持
 
-- ✅ Aliyun Drive（MVP Provider；私有接口实验模式）
-- ⬜ Quark Drive
+- ✅ 阿里云盘（MVP Provider；私有接口实验模式）
+- ⬜ 夸克网盘
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前为 `v0.1.0` 开发版本。Web、数据库、扫描和任务框架已经建立；Aliyun Drive 已实现账号校验、分享目录读取、个人盘目录操作和分享转存。默认使用 Web 私有接口实验模式，接口可能随上游更新失效，正式使用前仍需真实账号联调。
+> 当前为 `v0.1.0` 开发版本。Web、数据库、扫描和任务框架已经建立；阿里云盘已实现账号校验、分享目录读取、个人盘目录操作和分享转存。默认使用 Web 私有接口实验模式，接口可能随上游更新失效，正式使用前仍需真实账号联调。
 
 ## MVP 功能
 
@@ -31,9 +31,9 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 
 ## 技术栈
 
-- Backend: Python 3.12, FastAPI, SQLAlchemy, SQLite, APScheduler, Pydantic
-- Frontend: Vue 3, Vite, TypeScript, Element Plus
-- Deployment: Docker, Docker Compose, Nginx
+- 后端：Python 3.12、FastAPI、SQLAlchemy、SQLite、APScheduler、Pydantic
+- 前端：Vue 3、Vite、TypeScript、Element Plus
+- 部署：Docker、Docker Compose、Nginx
 
 ## 快速开始
 
@@ -109,7 +109,7 @@ docker-compose.yml
 
 业务代码只依赖 `CloudDriveProvider`。新 Provider 应实现账号校验、分享解析/遍历、目标目录解析/创建、目标文件查重和分享转存能力，并在注册表中声明。
 
-Aliyun Drive 提供私有接口和 OpenAPI 两个适配器：
+阿里云盘提供私有接口和 OpenAPI 两个适配器：
 
 - `ALIYUNDRIVE_MODE=private_api`（默认、实验性）：调用 Web 私有接口，实现 refresh token 刷新、分享解析与分页、个人盘目录查询/创建和分享转存。无需开放平台 Client ID，但不承诺接口稳定性。
 - `ALIYUNDRIVE_MODE=official`：调用 `https://openapi.alipan.com`，需要配置开放平台应用的 `ALIYUNDRIVE_CLIENT_ID` 和 `ALIYUNDRIVE_CLIENT_SECRET`；当前只支持账号校验和个人盘目录操作。
@@ -119,7 +119,7 @@ Aliyun Drive 提供私有接口和 OpenAPI 两个适配器：
 OpenAPI 绑定支持：
 
 - AListGo 托管刷新：填写 Open refresh token 和可配置的 HTTPS Token URL。该模式会把 Open token 发送给对应服务，界面会明确提示风险。
-- OpenList APIPages：填写由 OpenList APIPages 签发的 Aliyun Drive OAuth2 refresh token，默认使用国内社区端点，也可切换全球站或自建 APIPages 地址。
+- OpenList APIPages：填写由 OpenList APIPages 签发的阿里云盘 OAuth2 refresh token，默认使用国内社区端点，也可切换全球站或自建 APIPages 地址。
 - 自有应用：填写由自己 OpenAPI 应用签发的 refresh token、Client ID 和 Client Secret，MediaSync 直接请求阿里 Open OAuth，不经过第三方 Token 服务。
 
 不同应用签发的 refresh token 不能互换。AListGo、OpenList APIPages 和自有应用的 Open token 必须搭配各自的刷新服务或 Client 凭据；它们不能作为 Web 私有 token 使用，私有扫码取得的 token 也不能直接请求 OpenAPI。
@@ -149,21 +149,21 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 
 这些机制只能降低请求密度和瞬时并发，不能保证私有接口永不触发平台风控。大目录建议使用 30 分钟或更长的扫描周期，不要反复手动执行完整校验；相关参数可通过 `.env` 中的 `FOLDER_SCAN_BATCH_SIZE` 和 `FULL_SCAN_INTERVAL_HOURS` 调整。
 
-## Roadmap
+## 路线图
 
-- [x] 实现 Aliyun Drive 私有接口分享目录与分享转存链路
+- [x] 实现阿里云盘私有接口分享目录与分享转存链路
 - [ ] 使用真实账号完成端到端兼容性验证
 - [ ] 发布 `v0.1.0`
-- [ ] Quark Drive Provider
+- [ ] 夸克网盘 Provider
 - [ ] 115 Provider
 - [ ] OneDrive Provider
 - [ ] 多用户和更细粒度权限
 - [ ] PostgreSQL 与分布式任务队列
 
-## Contributing
+## 参与贡献
 
 参见 [CONTRIBUTING.md](CONTRIBUTING.md)。请勿在代码、测试、Issue 或日志中提交真实 token 和 Cookie。
 
-## License
+## 许可证
 
 [MIT](LICENSE)
