@@ -1,4 +1,5 @@
 import hashlib
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 from pathlib import PurePosixPath
@@ -10,7 +11,8 @@ from app.core.config import get_settings
 from app.models import CloudFile, FolderCheckpoint, Subscription, Task
 from app.models.base import utcnow
 from app.providers import get_provider
-from app.providers.base import RemoteItem, ShareInfo
+from app.providers.base import CloudDriveProvider, RemoteItem, ShareInfo
+from app.repositories import TaskRepository
 from app.scheduler.schedule import parse_schedule
 from app.services.account_service import get_decrypted_token, persist_provider_token
 from app.services.subscription_service import decrypt_share_password
@@ -24,6 +26,28 @@ class ScanResult:
     def add(self, other: "ScanResult") -> None:
         self.discovered += other.discovered
         self.folders_scanned += other.folders_scanned
+
+
+@dataclass(frozen=True)
+class ScanDomainResult:
+    scan: ScanResult
+    full_scan: bool
+    checkpoint_count: int
+
+
+class ScanCancelledError(RuntimeError):
+    pass
+
+
+async def _never_cancelled() -> bool:
+    return False
+
+
+async def _raise_if_cancelled(
+    cancellation_requested: Callable[[], Awaitable[bool]],
+) -> None:
+    if await cancellation_requested():
+        raise ScanCancelledError("scan cancelled at a safe traversal boundary")
 
 
 def fingerprint_item(item: RemoteItem) -> str:
@@ -42,7 +66,7 @@ def _queue_transfer(db: Session, subscription: Subscription, file: CloudFile) ->
     if db.scalar(select(Task.id).where(Task.idempotency_key == key)) is not None:
         return
     file.status = "pending"
-    db.add(
+    TaskRepository(db).create_task(
         Task(
             subscription_id=subscription.id,
             file_id=file.id,
@@ -50,7 +74,7 @@ def _queue_transfer(db: Session, subscription: Subscription, file: CloudFile) ->
             trigger_type="scheduled",
             status="pending",
             idempotency_key=key,
-        )
+        ),
     )
 
 
@@ -127,17 +151,19 @@ def _record_item(
 async def _scan_folder_contents(
     db: Session,
     subscription: Subscription,
-    provider: object,
+    provider: CloudDriveProvider,
     share: ShareInfo,
     parent_id: str,
     parent_path: PurePosixPath,
     create_transfers: bool,
+    cancellation_requested: Callable[[], Awaitable[bool]] = _never_cancelled,
 ) -> tuple[ScanResult, list[FolderCheckpoint]]:
     result = ScanResult(folders_scanned=1)
     child_folders: list[FolderCheckpoint] = []
     marker: str | None = None
     while True:
-        page = await provider.list_share_items(share, parent_id, marker)  # type: ignore[attr-defined]
+        await _raise_if_cancelled(cancellation_requested)
+        page = await provider.list_share_items(share, parent_id, marker)
         for item in page.items:
             relative_path = str(parent_path / item.filename)
             discovered, checkpoint = _record_item(
@@ -150,6 +176,7 @@ async def _scan_folder_contents(
             result.discovered += discovered
             if checkpoint is not None:
                 child_folders.append(checkpoint)
+        db.commit()
         marker = page.next_marker
         if not marker:
             break
@@ -159,11 +186,12 @@ async def _scan_folder_contents(
 async def _scan_folder_full(
     db: Session,
     subscription: Subscription,
-    provider: object,
+    provider: CloudDriveProvider,
     share: ShareInfo,
     parent_id: str,
     parent_path: PurePosixPath,
     create_transfers: bool,
+    cancellation_requested: Callable[[], Awaitable[bool]] = _never_cancelled,
 ) -> ScanResult:
     result, child_folders = await _scan_folder_contents(
         db,
@@ -173,8 +201,10 @@ async def _scan_folder_full(
         parent_id,
         parent_path,
         create_transfers,
+        cancellation_requested,
     )
     for checkpoint in child_folders:
+        await _raise_if_cancelled(cancellation_requested)
         child_result = await _scan_folder_full(
             db,
             subscription,
@@ -183,8 +213,10 @@ async def _scan_folder_full(
             checkpoint.remote_folder_id,
             PurePosixPath(checkpoint.relative_path),
             create_transfers,
+            cancellation_requested,
         )
         checkpoint.last_scanned_at = utcnow()
+        db.commit()
         result.add(child_result)
     return result
 
@@ -192,10 +224,11 @@ async def _scan_folder_full(
 async def _scan_folder_batch(
     db: Session,
     subscription: Subscription,
-    provider: object,
+    provider: CloudDriveProvider,
     share: ShareInfo,
     root_folder_id: str,
     create_transfers: bool,
+    cancellation_requested: Callable[[], Awaitable[bool]] = _never_cancelled,
 ) -> ScanResult:
     result, _ = await _scan_folder_contents(
         db,
@@ -205,6 +238,7 @@ async def _scan_folder_batch(
         root_folder_id,
         PurePosixPath(""),
         create_transfers,
+        cancellation_requested,
     )
     checkpoints = list(
         db.scalars(
@@ -219,6 +253,7 @@ async def _scan_folder_batch(
         )
     )
     for checkpoint in checkpoints:
+        await _raise_if_cancelled(cancellation_requested)
         folder_result, _ = await _scan_folder_contents(
             db,
             subscription,
@@ -227,8 +262,10 @@ async def _scan_folder_batch(
             checkpoint.remote_folder_id,
             PurePosixPath(checkpoint.relative_path),
             create_transfers,
+            cancellation_requested,
         )
         checkpoint.last_scanned_at = utcnow()
+        db.commit()
         result.add(folder_result)
     return result
 
@@ -240,6 +277,75 @@ def _full_scan_due(subscription: Subscription, force_full: bool) -> bool:
     if last_full.tzinfo is None:
         last_full = last_full.replace(tzinfo=UTC)
     return utcnow() - last_full >= timedelta(hours=get_settings().full_scan_interval_hours)
+
+
+async def execute_scan_domain(
+    db: Session,
+    subscription: Subscription,
+    provider: CloudDriveProvider,
+    *,
+    force_full: bool = False,
+    cancellation_requested: Callable[[], Awaitable[bool]] = _never_cancelled,
+) -> ScanDomainResult:
+    await _raise_if_cancelled(cancellation_requested)
+    password = decrypt_share_password(subscription)
+    share = await provider.resolve_share(subscription.share_url, password)
+    first_scan = subscription.last_scanned_at is None
+    create_transfers = not (
+        first_scan and subscription.initial_sync_mode == "future_only"
+    )
+    full_scan = _full_scan_due(subscription, force_full)
+    scan_started_at = utcnow()
+    root_folder_id = subscription.source_folder_id or share.root_folder_id
+    if full_scan:
+        result = await _scan_folder_full(
+            db,
+            subscription,
+            provider,
+            share,
+            root_folder_id,
+            PurePosixPath(""),
+            create_transfers,
+            cancellation_requested,
+        )
+        await _raise_if_cancelled(cancellation_requested)
+        db.execute(
+            delete(FolderCheckpoint).where(
+                FolderCheckpoint.subscription_id == subscription.id,
+                FolderCheckpoint.last_seen_at < scan_started_at,
+            )
+        )
+        db.commit()
+    else:
+        result = await _scan_folder_batch(
+            db,
+            subscription,
+            provider,
+            share,
+            root_folder_id,
+            create_transfers,
+            cancellation_requested,
+        )
+
+    await _raise_if_cancelled(cancellation_requested)
+    now = utcnow()
+    subscription.last_scanned_at = now
+    if full_scan:
+        subscription.last_full_scanned_at = now
+    subscription.next_scan_at = now + parse_schedule(subscription.schedule).delta
+    subscription.status = "active" if subscription.enabled else "disabled"
+    subscription.last_error = None
+    checkpoint_count = db.scalar(
+        select(func.count())
+        .select_from(FolderCheckpoint)
+        .where(FolderCheckpoint.subscription_id == subscription.id)
+    )
+    db.commit()
+    return ScanDomainResult(
+        scan=result,
+        full_scan=full_scan,
+        checkpoint_count=checkpoint_count or 0,
+    )
 
 
 async def run_scan(
@@ -274,60 +380,23 @@ async def run_scan(
     try:
         account = subscription.cloud_account
         provider = get_provider(account.provider, get_decrypted_token(account))
-        password = decrypt_share_password(subscription)
-        share = await provider.resolve_share(subscription.share_url, password)
-        first_scan = subscription.last_scanned_at is None
-        create_transfers = not (first_scan and subscription.initial_sync_mode == "future_only")
-        full_scan = _full_scan_due(subscription, force_full)
-        scan_started_at = utcnow()
-        root_folder_id = subscription.source_folder_id or share.root_folder_id
-        if full_scan:
-            result = await _scan_folder_full(
-                db,
-                subscription,
-                provider,
-                share,
-                root_folder_id,
-                PurePosixPath(""),
-                create_transfers,
-            )
-            db.execute(
-                delete(FolderCheckpoint).where(
-                    FolderCheckpoint.subscription_id == subscription.id,
-                    FolderCheckpoint.last_seen_at < scan_started_at,
-                )
-            )
-        else:
-            result = await _scan_folder_batch(
-                db,
-                subscription,
-                provider,
-                share,
-                root_folder_id,
-                create_transfers,
-            )
-        now = utcnow()
-        subscription.last_scanned_at = now
-        if full_scan:
-            subscription.last_full_scanned_at = now
-        subscription.next_scan_at = now + parse_schedule(subscription.schedule).delta
-        subscription.status = "active" if subscription.enabled else "disabled"
-        subscription.last_error = None
+        domain_result = await execute_scan_domain(
+            db,
+            subscription,
+            provider,
+            force_full=force_full,
+        )
         task.status = "success"
         request_count = getattr(provider, "request_count", None)
         request_summary = f"，API 请求 {request_count} 次" if request_count is not None else ""
-        checkpoint_count = db.scalar(
-            select(func.count())
-            .select_from(FolderCheckpoint)
-            .where(FolderCheckpoint.subscription_id == subscription.id)
-        )
-        mode = "完整校验" if full_scan else "增量轮询"
+        mode = "完整校验" if domain_result.full_scan else "增量轮询"
         task.message = (
-            f"{mode}完成：检查 {result.folders_scanned} 个目录，"
-            f"发现 {result.discovered} 个新增项目，目录检查点 {checkpoint_count or 0} 个"
+            f"{mode}完成：检查 {domain_result.scan.folders_scanned} 个目录，"
+            f"发现 {domain_result.scan.discovered} 个新增项目，"
+            f"目录检查点 {domain_result.checkpoint_count} 个"
             f"{request_summary}"
         )
-        task.finished_at = now
+        task.finished_at = utcnow()
         db.commit()
     except Exception as exc:
         now = utcnow()
