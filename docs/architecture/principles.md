@@ -1,120 +1,107 @@
-# Architecture Principles
+# 架构原则
 
-These principles govern changes to MediaSync's core architecture. They apply
-to maintainers and contributors, and take precedence over implementation
-convenience.
+这些原则约束 MediaSync 核心架构的演进，适用于所有维护者和贡献者，其优先级
+高于实现上的便利。
 
-Normative terms such as **MUST**, **MUST NOT**, **SHOULD**, and **MAY** describe
-requirements that contributions are expected to follow.
+文中的 **必须**、**不得**、**应该** 和 **可以** 是规范性用语，所有贡献都应
+遵守相应要求。
 
-## 1. Invariant First
+## 1. 不变量优先
 
-Core changes MUST define their invariants before implementation:
+核心变更必须在实现之前定义不变量：
 
-- valid states and transitions;
-- ownership and uniqueness constraints;
-- lifecycle and terminal behavior;
-- failure, recovery, and reconciliation rules;
-- compatibility and migration boundaries.
+- 合法状态和状态转换；
+- 所有权与唯一性约束；
+- 生命周期与终态行为；
+- 失败、恢复与对账规则；
+- 兼容性与迁移边界。
 
-Code is an implementation of those invariants, not their source of truth.
+代码是不变量的实现，不是不变量的事实来源。
 
-Invariants belong to distinct verification layers:
+不变量分属不同的验证层次：
 
-1. **Data invariants** are enforced by schema, constraints, migrations, and
-   model tests.
-2. **Engine behavior invariants** are enforced by repositories, state
-   transitions, leases, fencing, and integration tests.
-3. **Production runtime invariants** are verified through restart, network,
-   credential, partial-success, and fault-injection tests.
+1. **数据不变量**：由数据库结构、约束、迁移和模型测试保证。
+2. **引擎行为不变量**：由 Repository、状态转换、租约、fencing 和集成测试保证。
+3. **生产运行时不变量**：通过重启、网络异常、凭证异常、部分成功和故障注入测试验证。
 
-A PR MUST NOT pull behavior from a later layer into its scope merely to make a
-feature appear complete.
+PR 不得为了让功能看似完整，就把后续层次的行为偷偷纳入当前范围。
 
-### Task Run lifecycle
+### Task Run 生命周期
 
-A Task Run is mutable only while its execution is active. During that period,
-its status and operational result fields may advance from `RUNNING` to a
-terminal outcome.
+Task Run 仅在执行期间可变。在此期间，其状态和运行结果字段可以从 `RUNNING`
+推进到某个终态。
 
-After a Task Run reaches a terminal state:
+Task Run 进入终态后：
 
-- its run number MUST NOT be reused;
-- the record MUST NOT be deleted as part of normal operation;
-- its core execution outcome MUST NOT be changed;
-- later attempts MUST create a new Task Run.
+- 不得复用其运行序号；
+- 正常运行过程中不得删除该记录；
+- 不得修改其核心执行结果；
+- 后续尝试必须创建新的 Task Run。
 
-## 2. Design Before Runtime
+## 2. 运行时代码之前先完成设计
 
-A change that introduces or modifies core invariants in the Task Engine,
-Provider, Credential, Scheduler, or Storage modules MUST have an approved
-Design PR before its Runtime PR.
+凡是新增或修改 Task Engine、Provider、Credential、Scheduler 或 Storage
+核心不变量的变更，都必须先通过设计 PR，再提交运行时 PR。
 
-The expected sequence is:
+约定流程如下：
 
 ```text
-Design PR → Review → Architecture Merge → Issue → Runtime PR
+设计 PR → 评审 → 合并架构设计 → Issue → 运行时 PR
 ```
 
-Small fixes that preserve existing invariants do not require a new Design PR,
-but the Runtime PR MUST identify the invariant it preserves.
+保持现有不变量的小修复不需要新的设计 PR，但运行时 PR 必须明确它所维护的
+不变量。
 
-## 3. Database Is a Contract
+## 3. 数据库是一份契约
 
-A migration is not only a table edit. It changes the persistent contract
-between releases.
+迁移不只是修改数据表，它改变了不同版本之间的持久化契约。
 
-Every database change MUST consider:
+每次数据库变更都必须考虑：
 
-- existing and partially populated data;
-- deterministic backfill behavior;
-- application compatibility during upgrade;
-- backup, rollback, or restore limitations;
-- indexes, uniqueness, and referential integrity;
-- preservation of execution and audit history.
+- 已有数据和部分填充的数据；
+- 确定性的回填行为；
+- 升级期间的应用兼容性；
+- 备份、回滚或恢复限制；
+- 索引、唯一性和引用完整性；
+- 执行历史与审计历史的保留。
 
-Alembic is the production migration authority. Runtime startup code MUST NOT
-silently reinterpret or rewrite an existing schema.
+Alembic 是生产环境迁移的唯一权威。运行时启动代码不得静默地重新解释或重写
+已有数据库结构。
 
-## 4. Runtime Failure Is Normal
+## 4. 运行时故障是常态
 
-Designs MUST assume that the following events will occur:
+设计必须假定下列事件一定会发生：
 
-- a NAS or container restarts during work;
-- a Provider request times out or is rate-limited;
-- a credential expires or is revoked;
-- a remote operation succeeds before the local commit;
-- a worker pauses, crashes, or resumes after losing ownership.
+- NAS 或容器在任务执行期间重启；
+- Provider 请求超时或被限流；
+- 凭证过期或被撤销；
+- 远端操作成功，但本地事务尚未提交；
+- Worker 暂停、崩溃，或在失去所有权后恢复运行。
 
-Success-path behavior is incomplete without bounded retry, recovery,
-reconciliation, ownership fencing, and observable history.
+如果缺少有界重试、恢复、对账、所有权 fencing 和可观测历史，那么成功路径
+也不能算完整。
 
-## 5. NAS First
+## 5. NAS 优先
 
-MediaSync prioritizes a reliable, understandable self-hosted deployment:
+MediaSync 优先保证自托管部署可靠、简单且容易理解：
 
 ```text
 SQLite
-+ one worker
-+ controlled concurrency
++ 单 Worker
++ 受控并发
 ```
 
-The project MUST NOT add distributed infrastructure for hypothetical scale at
-the expense of the default NAS experience. PostgreSQL, multiple workers, or an
-external queue require demonstrated need, a Design PR, and an explicit
-deployment profile.
+项目不得为了假设中的未来规模而引入分布式基础设施，损害默认 NAS 体验。
+PostgreSQL、多 Worker 或外部队列必须先有明确需求、设计 PR 和独立部署方案。
 
-## 6. Small, Reviewable Changes
+## 6. 小而可审查的变更
 
-MediaSync prefers small, reviewable changes over large rewrites.
+MediaSync 选择小而可审查的变更，不做大规模一次性重写。
 
-- Each Issue SHOULD cover one architecture boundary.
-- Each PR SHOULD solve one explicit problem.
-- Incidental improvements MUST NOT silently expand the approved scope.
-- Large refactors SHOULD be delivered as a sequence of independently
-  reviewable changes.
-- Every step in that sequence MUST keep the project buildable, testable, and
-  releasable.
+- 每个 Issue 应该只覆盖一个架构边界。
+- 每个 PR 应该只解决一个明确问题。
+- 顺手优化不得静默扩大已批准的范围。
+- 大型重构应该拆成一系列可独立审查的变更。
+- 该系列中的每一步都必须保持项目可构建、可测试、可发布。
 
-Follow-up work should be recorded explicitly instead of being added because it
-is convenient to implement at the same time.
+后续工作应明确记录，不得仅仅因为“顺手”就在当前变更中一并实现。

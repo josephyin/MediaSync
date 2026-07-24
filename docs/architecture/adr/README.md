@@ -1,100 +1,95 @@
-# Architecture Decision Records
+# 架构决策记录
 
-Architecture Decision Records (ADRs) explain why MediaSync chose a durable
-architectural direction and what consequences follow from it.
+架构决策记录（ADR）用于解释 MediaSync 为什么选择某项长期架构方向，以及该
+决定会带来哪些后果。
 
-An ADR records a long-lived decision. A Design Spec describes the detailed
-contract and implementation boundaries for a concrete change. ADRs should link
-to Design Specs instead of duplicating their protocols.
+ADR 记录长期有效的决策；设计规范描述某项具体变更的详细契约和实现边界。
+ADR 应链接到设计规范，而不是重复其中的协议细节。
 
-## When an ADR is required
+## 何时需要 ADR
 
-Create or supersede an ADR when a change:
+出现以下变更时，应新增 ADR 或用新 ADR 取代旧决策：
 
-- introduces or changes a core architectural invariant;
-- changes a supported deployment profile;
-- changes ownership, persistence, or failure-recovery semantics;
-- adopts or removes a foundational dependency;
-- reverses a decision that contributors might otherwise reintroduce.
+- 新增或修改核心架构不变量；
+- 修改受支持的部署方案；
+- 修改所有权、持久化或故障恢复语义；
+- 引入或移除基础依赖；
+- 推翻一项贡献者将来可能重新引入的决定。
 
-Routine fixes that preserve accepted decisions do not need a new ADR.
+不改变既有决策的常规修复无需新增 ADR。
 
-## Naming and status
+## 命名与状态
 
-Files use a sequential number and a durable decision name:
+文件名由连续编号和长期有效的决策名称组成：
 
 ```text
 ADR-0001-single-worker-on-sqlite.md
 ADR-0002-task-execution-model.md
 ```
 
-Supported statuses:
+支持以下状态：
 
-- `Proposed`
-- `Accepted`
-- `Superseded by ADR-NNNN`
-- `Deprecated`
-- `Rejected`
+- `提议中（Proposed）`
+- `已接受（Accepted）`
+- `已由 ADR-NNNN 取代（Superseded by ADR-NNNN）`
+- `已弃用（Deprecated）`
+- `已拒绝（Rejected）`
 
-Numbers are never reused. Accepted ADRs are historical records and MUST NOT be
-rewritten to reflect a new decision. Correct small factual or formatting
-errors in place; use a new ADR to supersede a decision. Status and
-`Superseded by` metadata may be updated to link the historical record to its
-replacement, but the original context and decision remain unchanged.
+编号永不复用。已接受的 ADR 是历史记录，不得为了反映新决定而重写。小范围的
+事实或格式错误可以直接修正；取代旧决策必须新增 ADR。可以更新状态和
+`Superseded by` 元数据以链接替代决策，但原始背景和决定必须保持不变。
 
-## Process
+## 流程
 
-1. Define the relevant invariants in a Design PR.
-2. Add the next sequential ADR when the decision has long-term architectural
-   consequences.
-3. Describe context, decision, consequences, alternatives, and future
-   conditions.
-4. Review architecture separately from Runtime code.
-5. Merge the Design PR before opening the implementation Issue or Runtime PR.
-6. Link subsequent Issues and Runtime PRs to the accepted ADR and Design Spec.
+1. 在设计 PR 中定义相关不变量。
+2. 决策具有长期架构影响时，增加下一条连续编号的 ADR。
+3. 说明背景、决定、后果、备选方案和未来复审条件。
+4. 架构设计与运行时代码分开评审。
+5. 先合并设计 PR，再创建实现 Issue 或运行时 PR。
+6. 后续 Issue 和运行时 PR 必须链接已接受的 ADR 与设计规范。
 
-An ADR marked `Accepted` becomes binding when its Design PR is merged.
+状态为 `已接受（Accepted）` 的 ADR 在其设计 PR 合并后具有约束力。
 
-## ADR template
+## ADR 模板
 
 ```markdown
-# ADR-NNNN: Decision title
+# ADR-NNNN：决策标题
 
-- Status: Proposed
-- Date: YYYY-MM-DD
-- Decision Makers: MediaSync maintainers
-- Supersedes: None
-- Superseded by: None
-- Related: links to Design Specs, Issues, or PRs
+- 状态：提议中
+- 日期：YYYY-MM-DD
+- 决策者：MediaSync 维护者
+- 取代：无
+- 被取代：无
+- 相关内容：设计规范、Issue 或 PR 链接
 
-## Context
+## 背景
 
-What forces are acting on the decision?
+有哪些因素推动了这项决策？
 
-## Decision
+## 决策
 
-What is the durable choice?
+长期有效的选择是什么？
 
-## Invariants
+## 不变量
 
-What must remain true?
+哪些条件必须始终成立？
 
-## Consequences
+## 后果
 
-What becomes easier, harder, supported, or unsupported?
+哪些事情会变得更容易、更困难、受支持或不受支持？
 
-## Alternatives considered
+## 已考虑的备选方案
 
-Which realistic alternatives were rejected, and why?
+拒绝了哪些现实可行的方案，原因是什么？
 
-## Future review
+## 未来复审
 
-What evidence would justify superseding this decision?
+出现哪些证据时，应该考虑用新决策取代本 ADR？
 ```
 
-## Index
+## 索引
 
-| ADR | Decision | Status |
+| ADR | 决策 | 状态 |
 |---|---|---|
-| [ADR-0001](ADR-0001-single-worker-on-sqlite.md) | Single Worker on SQLite | Accepted |
-| [ADR-0002](ADR-0002-task-execution-model.md) | Task Execution Model | Accepted |
+| [ADR-0001](ADR-0001-single-worker-on-sqlite.md) | SQLite 单 Worker | 已接受 |
+| [ADR-0002](ADR-0002-task-execution-model.md) | 任务执行模型 | 已接受 |
