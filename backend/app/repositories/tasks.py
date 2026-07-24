@@ -72,6 +72,7 @@ class ExpiredTaskLease:
     worker_id: str
     lock_token: str
     lease_until: datetime
+    retry_count: int
 
 
 @dataclass(frozen=True)
@@ -365,6 +366,7 @@ class TaskRepository:
         metrics: dict[str, object] | None = None,
         blocked_reason: str | None = None,
         next_attempt_at: datetime | None = None,
+        consume_retry_budget: bool = False,
     ) -> tuple[Task, TaskRun]:
         if not worker_id:
             raise ValueError("worker_id must not be empty")
@@ -396,6 +398,12 @@ class TaskRepository:
                 "updated_at": ownership_checked_at,
             }
         )
+        if consume_retry_budget:
+            if task_status in {"success", "waiting_credential", "cancelled"}:
+                raise ValueError(
+                    f"task status {task_status!r} cannot consume retry budget"
+                )
+            task_values["retry_count"] = Task.retry_count + 1
         run_values: dict[str, object] = {
             "status": run_status,
             "finished_at": outcome_at,
@@ -464,6 +472,7 @@ class TaskRepository:
                 Task.locked_by,
                 Task.lock_token,
                 Task.lease_until,
+                Task.retry_count,
             )
             .where(
                 Task.status.in_(LEASED_TASK_STATUSES),
@@ -486,6 +495,7 @@ class TaskRepository:
                     worker_id=row.locked_by,
                     lock_token=row.lock_token,
                     lease_until=row.lease_until,
+                    retry_count=row.retry_count,
                 )
             )
         return leases
