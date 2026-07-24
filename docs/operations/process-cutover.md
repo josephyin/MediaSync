@@ -56,7 +56,7 @@ between the old and new topologies.
 4. Start the new topology:
 
    ```bash
-   docker compose up -d --build
+   docker compose up -d --build --remove-orphans
    ```
 
    Compose runs `alembic upgrade head`, then `python -m app.reconcile`. API,
