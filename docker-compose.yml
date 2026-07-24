@@ -1,0 +1,119 @@
+x-mediasync-backend: &mediasync-backend
+  build:
+    context: ./backend
+  image: mediasync-backend:${MEDIASYNC_IMAGE_TAG:-local}
+  init: true
+  environment:
+    ENVIRONMENT: production
+    DATABASE_URL: sqlite:////data/mediasync.db
+    SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+    CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?Set CREDENTIAL_ENCRYPTION_KEY in .env}
+    ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+    BACKGROUND_EXECUTION_MODE: process
+    ALIYUNDRIVE_MODE: ${ALIYUNDRIVE_MODE:-private_api}
+    ALIYUNDRIVE_PRIVATE_API_BASE_URL: ${ALIYUNDRIVE_PRIVATE_API_BASE_URL:-https://api.alipan.com}
+    ALIYUNDRIVE_PRIVATE_AUTH_BASE_URL: ${ALIYUNDRIVE_PRIVATE_AUTH_BASE_URL:-https://auth.alipan.com}
+    ALIYUNDRIVE_QR_LOGIN_BASE_URL: ${ALIYUNDRIVE_QR_LOGIN_BASE_URL:-https://passport.aliyundrive.com}
+    ALIYUNDRIVE_CLIENT_ID: ${ALIYUNDRIVE_CLIENT_ID:-}
+    ALIYUNDRIVE_CLIENT_SECRET: ${ALIYUNDRIVE_CLIENT_SECRET:-}
+    ALIYUNDRIVE_API_BASE_URL: ${ALIYUNDRIVE_API_BASE_URL:-https://openapi.alipan.com}
+    ALIYUNDRIVE_REQUEST_INTERVAL_SECONDS: ${ALIYUNDRIVE_REQUEST_INTERVAL_SECONDS:-0.8}
+    ALIYUNDRIVE_REQUEST_JITTER_SECONDS: ${ALIYUNDRIVE_REQUEST_JITTER_SECONDS:-0.3}
+    ALIYUNDRIVE_REQUEST_MAX_RETRIES: ${ALIYUNDRIVE_REQUEST_MAX_RETRIES:-3}
+    ALIYUNDRIVE_RETRY_BACKOFF_SECONDS: ${ALIYUNDRIVE_RETRY_BACKOFF_SECONDS:-2}
+    ALIYUNDRIVE_RETRY_MAX_SECONDS: ${ALIYUNDRIVE_RETRY_MAX_SECONDS:-30}
+    SCHEDULER_JITTER_SECONDS: ${SCHEDULER_JITTER_SECONDS:-120}
+    MANUAL_SCAN_COOLDOWN_SECONDS: ${MANUAL_SCAN_COOLDOWN_SECONDS:-60}
+    FOLDER_SCAN_BATCH_SIZE: ${FOLDER_SCAN_BATCH_SIZE:-20}
+    FULL_SCAN_INTERVAL_HOURS: ${FULL_SCAN_INTERVAL_HOURS:-24}
+    TRANSFER_BATCH_SIZE: ${TRANSFER_BATCH_SIZE:-2}
+    TRANSFER_RETRY_BASE_SECONDS: ${TRANSFER_RETRY_BASE_SECONDS:-30}
+    TRANSFER_RETRY_MAX_SECONDS: ${TRANSFER_RETRY_MAX_SECONDS:-900}
+    SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-10}
+    SCHEDULER_BATCH_SIZE: ${SCHEDULER_BATCH_SIZE:-100}
+    WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
+    WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-60}
+    WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-20}
+    WORKER_RECOVERY_BATCH_SIZE: ${WORKER_RECOVERY_BATCH_SIZE:-100}
+    WORKER_RETRY_BASE_SECONDS: ${WORKER_RETRY_BASE_SECONDS:-30}
+    WORKER_RETRY_MAX_SECONDS: ${WORKER_RETRY_MAX_SECONDS:-900}
+  volumes:
+    - mediasync-data:/data
+
+services:
+  mediasync-migrate:
+    <<: *mediasync-backend
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  mediasync-cutover:
+    <<: *mediasync-backend
+    command: ["python", "-m", "app.reconcile"]
+    restart: "no"
+    depends_on:
+      mediasync-migrate:
+        condition: service_completed_successfully
+
+  mediasync-api:
+    <<: *mediasync-backend
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "1"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      mediasync-cutover:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/system/health')
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  mediasync-scheduler:
+    <<: *mediasync-backend
+    command: ["python", "-m", "app.scheduler"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      mediasync-cutover:
+        condition: service_completed_successfully
+    deploy:
+      replicas: 1
+
+  mediasync-worker:
+    <<: *mediasync-backend
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    stop_grace_period: 90s
+    depends_on:
+      mediasync-cutover:
+        condition: service_completed_successfully
+    deploy:
+      replicas: 1
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mediasync-api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  mediasync-data:
