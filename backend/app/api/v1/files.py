@@ -6,6 +6,7 @@ from app.models import CloudFile, Task
 from app.schemas.common import Page
 from app.schemas.file import CloudFileRead
 from app.schemas.task import TaskRead
+from app.services.task_enqueue_service import enqueue_transfer_retry
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -55,32 +56,7 @@ def retry_file(file_id: int, db: DbSession, _: AdminUser) -> Task:
     file = db.get(CloudFile, file_id)
     if file is None:
         raise HTTPException(status_code=404, detail="File not found")
-    task = db.scalar(
-        select(Task)
-        .where(Task.file_id == file.id, Task.type == "transfer")
-        .order_by(Task.created_at.desc())
-    )
-    if task and task.status in {"pending", "running"}:
-        return task
-    if task:
-        task.status = "pending"
-        task.attempt_count = 0
-        task.error_code = None
-        task.message = None
-        task.finished_at = None
-        task.next_attempt_at = None
-    else:
-        task = Task(
-            subscription_id=file.subscription_id,
-            file_id=file.id,
-            type="transfer",
-            trigger_type="retry",
-            status="pending",
-            idempotency_key=f"transfer:{file.subscription_id}:{file.remote_file_id}:{file.fingerprint}",
-        )
-        db.add(task)
-    file.status = "pending"
-    file.last_error = None
+    task = enqueue_transfer_retry(db, file)
     db.commit()
     db.refresh(task)
     return task

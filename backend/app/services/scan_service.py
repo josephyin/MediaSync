@@ -332,7 +332,8 @@ async def execute_scan_domain(
     subscription.last_scanned_at = now
     if full_scan:
         subscription.last_full_scanned_at = now
-    subscription.next_scan_at = now + parse_schedule(subscription.schedule).delta
+    if get_settings().background_execution_mode == "legacy":
+        subscription.next_scan_at = now + parse_schedule(subscription.schedule).delta
     subscription.status = "active" if subscription.enabled else "disabled"
     subscription.last_error = None
     checkpoint_count = db.scalar(

@@ -14,8 +14,23 @@ from app.schemas.subscription import SubscriptionCreate, SubscriptionRead, Subsc
 from app.schemas.task import TaskRead
 from app.services.scan_service import run_scan_by_id
 from app.services.subscription_service import create_subscription, update_subscription
+from app.services.task_enqueue_service import enqueue_manual_scan
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
+
+
+def _legacy_execution_enabled() -> bool:
+    return get_settings().background_execution_mode == "legacy"
+
+
+def _upsert_legacy_subscription_job(subscription: Subscription) -> None:
+    if _legacy_execution_enabled():
+        upsert_subscription_job(subscription)
+
+
+def _remove_legacy_subscription_job(subscription_id: int) -> None:
+    if _legacy_execution_enabled():
+        remove_subscription_job(subscription_id)
 
 
 def _get_subscription(db: DbSession, subscription_id: int) -> Subscription:
@@ -65,7 +80,7 @@ async def add_subscription(
         raise HTTPException(status_code=409, detail="Subscription already exists") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    upsert_subscription_job(subscription)
+    _upsert_legacy_subscription_job(subscription)
     return subscription
 
 
@@ -82,14 +97,14 @@ def patch_subscription(
     _: AdminUser,
 ) -> Subscription:
     subscription = update_subscription(db, _get_subscription(db, subscription_id), payload)
-    upsert_subscription_job(subscription)
+    _upsert_legacy_subscription_job(subscription)
     return subscription
 
 
 @router.delete("/{subscription_id}", response_model=MessageResponse)
 def delete_subscription(subscription_id: int, db: DbSession, _: AdminUser) -> MessageResponse:
     subscription = _get_subscription(db, subscription_id)
-    remove_subscription_job(subscription.id)
+    _remove_legacy_subscription_job(subscription.id)
     db.delete(subscription)
     db.commit()
     return MessageResponse(message="Subscription deleted; target files were not removed")
@@ -119,23 +134,14 @@ def scan_subscription(
                 status_code=429,
                 detail=f"请等待 {int(remaining) + 1} 秒后再手动扫描",
             )
-    existing = db.scalar(
-        select(Task).where(
-            Task.subscription_id == subscription.id,
-            Task.type == "scan",
-            Task.status.in_(["pending", "running"]),
-        )
+    enqueue_result = enqueue_manual_scan(
+        db,
+        subscription,
+        force_full=full,
     )
-    if existing:
-        return existing
-    task = Task(
-        subscription_id=subscription.id,
-        type="scan",
-        trigger_type="manual",
-        status="pending",
-    )
-    db.add(task)
+    task = enqueue_result.task
     db.commit()
     db.refresh(task)
-    background_tasks.add_task(run_scan_by_id, subscription.id, "manual", full)
+    if _legacy_execution_enabled() and enqueue_result.created:
+        background_tasks.add_task(run_scan_by_id, subscription.id, "manual", full)
     return task

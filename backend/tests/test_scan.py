@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine, select
@@ -142,7 +143,11 @@ async def test_regular_scan_checks_root_and_oldest_folder_batch(monkeypatch) -> 
     monkeypatch.setattr("app.services.scan_service.get_decrypted_token", lambda *_: "token")
     monkeypatch.setattr(
         "app.services.scan_service.get_settings",
-        lambda: SimpleNamespace(folder_scan_batch_size=1, full_scan_interval_hours=24),
+        lambda: SimpleNamespace(
+            folder_scan_batch_size=1,
+            full_scan_interval_hours=24,
+            background_execution_mode="legacy",
+        ),
     )
 
     with Session(engine) as db:
@@ -178,3 +183,54 @@ async def test_regular_scan_checks_root_and_oldest_folder_batch(monkeypatch) -> 
         assert second.status == "success"
         assert "增量轮询完成" in (second.message or "")
         assert provider.calls == ["root", "folder-1"]
+
+
+async def test_process_mode_scan_does_not_advance_periodic_schedule(monkeypatch) -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    next_scan_at = datetime(2026, 7, 25, 8, 0, tzinfo=UTC)
+    monkeypatch.setattr("app.services.scan_service.get_provider", lambda *_: FakeProvider())
+    monkeypatch.setattr("app.services.scan_service.get_decrypted_token", lambda *_: "token")
+    monkeypatch.setattr(
+        "app.services.scan_service.get_settings",
+        lambda: SimpleNamespace(
+            folder_scan_batch_size=20,
+            full_scan_interval_hours=24,
+            background_execution_mode="process",
+        ),
+    )
+
+    with Session(engine) as db:
+        account = CloudAccount(
+            provider="aliyundrive",
+            name="process-mode",
+            refresh_token="encrypted",
+            status="active",
+        )
+        db.add(account)
+        db.flush()
+        subscription = Subscription(
+            cloud_account_id=account.id,
+            name="process-mode",
+            provider="aliyundrive",
+            share_url="https://www.alipan.com/s/share-1",
+            share_key="share-1",
+            source_folder_id="root",
+            target_path="/Media",
+            schedule="interval:30m",
+            enabled=True,
+            status="active",
+            initial_sync_mode="all",
+            next_scan_at=next_scan_at,
+        )
+        db.add(subscription)
+        db.commit()
+
+        task = await run_scan(db, subscription, "manual")
+
+        assert task.status == "success"
+        persisted_next_scan_at = subscription.next_scan_at
+        assert persisted_next_scan_at is not None
+        if persisted_next_scan_at.tzinfo is None:
+            persisted_next_scan_at = persisted_next_scan_at.replace(tzinfo=UTC)
+        assert persisted_next_scan_at == next_scan_at
