@@ -1,7 +1,7 @@
 from datetime import UTC
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import AdminUser, DbSession
@@ -15,6 +15,7 @@ from app.schemas.task import TaskRead
 from app.services.scan_service import run_scan_by_id
 from app.services.subscription_service import create_subscription, update_subscription
 from app.services.task_enqueue_service import enqueue_manual_scan
+from app.task_engine import TERMINAL_TASK_STATUSES
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -104,10 +105,29 @@ def patch_subscription(
 @router.delete("/{subscription_id}", response_model=MessageResponse)
 def delete_subscription(subscription_id: int, db: DbSession, _: AdminUser) -> MessageResponse:
     subscription = _get_subscription(db, subscription_id)
+    active_task_id = db.scalar(
+        select(Task.id)
+        .where(
+            Task.subscription_id == subscription.id,
+            Task.status.not_in(TERMINAL_TASK_STATUSES),
+        )
+        .limit(1)
+    )
+    if active_task_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="订阅仍有活动任务，请先停用订阅并等待任务结束后再删除",
+        )
     _remove_legacy_subscription_job(subscription.id)
+    db.execute(
+        update(Task)
+        .where(Task.subscription_id == subscription.id)
+        .values(subscription_id=None, file_id=None)
+        .execution_options(synchronize_session=False)
+    )
     db.delete(subscription)
     db.commit()
-    return MessageResponse(message="Subscription deleted; target files were not removed")
+    return MessageResponse(message="订阅已删除，Task 执行历史和云盘目标文件已保留")
 
 
 @router.post("/{subscription_id}/scan", response_model=TaskRead, status_code=202)
