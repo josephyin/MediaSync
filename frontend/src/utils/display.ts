@@ -23,10 +23,25 @@ export function statusType(value: string | null | undefined) {
   return 'info'
 }
 
+const isoDateTimeWithoutTimezone =
+  /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/
+
+export function parseApiDateTime(value: string | null | undefined) {
+  if (!value) return null
+  const trimmed = value.trim()
+  // SQLite 会丢失 timezone=True 的偏移信息；MediaSync 后端时间统一按 UTC 写入。
+  // 对无时区的 API 时间补回 UTC 标识，再交给浏览器转换为用户本地时区。
+  const normalized = isoDateTimeWithoutTimezone.test(trimmed)
+    ? `${trimmed.replace(' ', 'T')}Z`
+    : trimmed
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 export function formatDateTime(value: string | null | undefined) {
   if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
+  const date = parseApiDateTime(value)
+  if (!date) return value
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false,
@@ -35,8 +50,8 @@ export function formatDateTime(value: string | null | undefined) {
 
 export function formatRelativeTime(value: string | null | undefined) {
   if (!value) return '暂无记录'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
+  const date = parseApiDateTime(value)
+  if (!date) return value
   const seconds = Math.round((date.getTime() - Date.now()) / 1000)
   const formatter = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' })
   if (Math.abs(seconds) < 60) return formatter.format(seconds, 'second')
