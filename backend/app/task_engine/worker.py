@@ -181,11 +181,14 @@ class WorkerRuntime:
         *,
         stop: asyncio.Event,
         idle_poll_interval: timedelta = timedelta(seconds=1),
+        on_cycle: Callable[[WorkerCycleResult], None] | None = None,
     ) -> None:
         if idle_poll_interval <= timedelta(0):
             raise ValueError("idle_poll_interval must be positive")
         while not stop.is_set():
             result = await self.run_once()
+            if on_cycle is not None:
+                on_cycle(result)
             if result.status != "idle":
                 continue
             try:
