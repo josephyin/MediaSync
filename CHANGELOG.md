@@ -2,6 +2,25 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.5] - 2026-07-28
+
+这是 v0.2 可靠性基础的第五个候选版本，保留 rc.4 的飞牛友好镜像默认值，并
+修复已有数据目录升级时管理员密码可能被默认值覆盖的问题。
+
+### 修复
+
+- 新增 `IMAGE_DEFAULT_ADMIN_ONLY=true` 镜像标记。
+- 全新 `/data` 仍默认使用用户名 `admin`、密码 `admin`。
+- 已有 `/data` 会忽略镜像自带的 `admin` 默认值，继续保留原管理员密码。
+- 用户显式填写其他 `ADMIN_PASSWORD` 时仍可离线重置密码。
+- 增加旧密码保留和自定义密码覆盖测试。
+
+### 安全说明
+
+- rc.4 不建议用于已有数据目录升级；请直接使用 rc.5。
+- 默认密码仅用于全新安装，首次登录后必须改为强密码。
+- 加密密钥生成、持久化和拒绝静默轮换规则不变。
+
 ## [0.2.0-rc.4] - 2026-07-28
 
 这是 v0.2 可靠性基础的第四个候选版本，重点优化飞牛 fnOS 等图形化 Docker
@@ -126,6 +145,7 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.5]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.5
 [0.2.0-rc.4]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.4
 [0.2.0-rc.3]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.3
 [0.2.0-rc.2]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.2

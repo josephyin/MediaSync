@@ -19,7 +19,7 @@
 1. 打开飞牛的“Docker”应用；
 2. 进入“镜像仓库”或“镜像”；
 3. 搜索 `josephyjq/mediasync`；
-4. 选择精确标签 `v0.2.0-rc.4`；
+4. 选择精确标签 `v0.2.0-rc.5`；
 5. 下载镜像。
 
 候选版本建议使用精确标签，便于升级和回滚。
@@ -67,7 +67,7 @@
 | 变量 | 默认值 |
 |---|---|
 | `ADMIN_PASSWORD` | `admin` |
-| `ADMIN_PASSWORD_DEFAULT_ONLY` | `true` |
+| `IMAGE_DEFAULT_ADMIN_ONLY` | `true` |
 | `SESSION_COOKIE_SECURE` | `false` |
 
 建议在创建容器时把管理员密码改为自己的强密码：
