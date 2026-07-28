@@ -2,6 +2,34 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.4] - 2026-07-28
+
+这是 v0.2 可靠性基础的第四个候选版本，重点优化飞牛 fnOS 等图形化 Docker
+平台的首次安装默认值。
+
+### 改进
+
+- Appliance Web 入口统一使用容器端口 `8080`。
+- 镜像只声明一个 `8080/tcp`，不再让图形界面自动生成内部 API `8000` 映射。
+- 镜像声明 `/data` 持久化卷，飞牛创建容器时可以自动显示容器路径。
+- `ADMIN_PASSWORD` 默认值为 `admin`，图形界面无需手工补齐即可首次登录。
+- 健康检查改为探测 Appliance 的 `8080` 入口。
+- 更新 Docker、飞牛和 Docker Hub 中文安装说明。
+
+### 安全说明
+
+- 默认用户名和密码均为 `admin`，只用于受信任局域网的首次安装。
+- 首次登录后必须通过 `ADMIN_PASSWORD` 设置自己的强密码并重建容器。
+- 使用默认密码时不得把管理端口暴露到公网。
+- 加密密钥仍由 Appliance 随机生成并持久化，不使用固定默认值。
+
+### 兼容性
+
+- 本版本不包含数据库模型、迁移、Task Engine 或 Provider 行为变化。
+- 单容器部署从 `8080:80` 改为 `8080:8080`。
+- 高级多容器 Compose 继续使用宿主机 `8080` 到前端容器 `80` 的映射，职责和
+  内部端口契约不变。
+
 ## [0.2.0-rc.3] - 2026-07-28
 
 这是 v0.2 可靠性基础的第三个候选版本，重点把单镜像进一步变为普通 NAS 用户
@@ -98,6 +126,7 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.4]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.4
 [0.2.0-rc.3]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.3
 [0.2.0-rc.2]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.2
 [0.2.0-rc.1]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.1
