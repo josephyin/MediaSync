@@ -10,7 +10,7 @@ Compose 文件。
 
 ```text
 MediaSync Launcher
-├── Nginx（容器端口 80）
+├── Nginx（容器端口 8080）
 ├── API
 ├── Scheduler
 └── Worker
@@ -43,7 +43,7 @@ docker pull josephyjq/mediasync:v0.2.0-rc.3
 
 docker run -d \
   --name mediasync \
-  -p 8080:80 \
+  -p 8080:8080 \
   -v /volume1/docker/mediasync:/data \
   --restart unless-stopped \
   --stop-timeout 120 \
@@ -56,19 +56,15 @@ docker run -d \
 http://NAS_IP:8080
 ```
 
-管理员用户名默认为 `admin`。未指定密码时，MediaSync 会在第一次启动时生成
-随机密码，并且只显示一次：
-
-```bash
-docker logs mediasync 2>&1 | grep appliance_initial_admin_password
-```
+管理员用户名和密码默认均为 `admin`。该默认值仅用于降低 NAS 图形界面的首次
+安装门槛，首次登录后必须改为自己的强密码。
 
 建议在首次安装时直接指定自己的密码：
 
 ```bash
 docker run -d \
   --name mediasync \
-  -p 8080:80 \
+  -p 8080:8080 \
   -v /volume1/docker/mediasync:/data \
   -e ADMIN_PASSWORD='请替换为强密码' \
   --restart unless-stopped \
@@ -84,7 +80,7 @@ NAS 的环境变量表单。
 | 环境变量 | 默认值 | 说明 |
 |---|---:|---|
 | `ADMIN_USERNAME` | `admin` | 管理员用户名 |
-| `ADMIN_PASSWORD` | 自动生成 | 首次密码；后续用新值重建容器可离线重置 |
+| `ADMIN_PASSWORD` | `admin` | 管理员密码；首次登录后必须改为强密码 |
 | `SESSION_COOKIE_SECURE` | `false` | HTTPS 反向代理部署时设为 `true` |
 | `LOG_LEVEL` | `INFO` | 容器日志级别 |
 | `ALIYUNDRIVE_MODE` | `private_api` | 阿里云盘 Provider 模式 |
@@ -175,7 +171,7 @@ docker rm mediasync
 ```bash
 docker run -d \
   --name mediasync \
-  -p 8080:80 \
+  -p 8080:8080 \
   -v /volume1/docker/mediasync:/data \
   -e SECRET_KEY='rc.2 原值' \
   -e CREDENTIAL_ENCRYPTION_KEY='rc.2 原值' \
@@ -200,6 +196,7 @@ rc.3 没有新增数据库迁移，但回滚前仍必须保留完整备份。
 
 ## 9. 安全说明
 
+- 默认用户名和密码均为 `admin`，首次登录后必须设置强密码；
 - 默认 `SESSION_COOKIE_SECURE=false` 只适用于受信任的局域网 HTTP；
 - 不要把 `8080` 管理端口直接映射到公网；
 - 公网访问必须使用 HTTPS 反向代理，并设置

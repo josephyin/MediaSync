@@ -13,7 +13,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DEFAULT_HEALTH_SOCKET_PATH = Path("/run/mediasync/health.sock")
-DEFAULT_NGINX_HEALTH_URL = "http://127.0.0.1/"
+DEFAULT_NGINX_HEALTH_URL = "http://127.0.0.1:8080/"
 DEFAULT_API_HEALTH_URL = "http://127.0.0.1:8000/api/v1/system/health"
 REQUIRED_COMPONENTS = ("launcher", "nginx", "api", "scheduler", "worker")
 MAX_HEALTH_RESPONSE_BYTES = 16 * 1024

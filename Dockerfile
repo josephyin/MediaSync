@@ -18,7 +18,8 @@ RUN pip wheel --no-cache-dir --wheel-dir /wheels .
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    ADMIN_PASSWORD=admin
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --yes nginx \
@@ -37,7 +38,9 @@ COPY --from=frontend-builder /build/dist /usr/share/nginx/html
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/nginx-appliance.conf /etc/nginx/nginx-appliance.conf
 
-EXPOSE 80 8000
+VOLUME ["/data"]
+
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-m", "app.appliance.healthcheck"]

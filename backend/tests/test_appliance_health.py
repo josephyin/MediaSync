@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from app.appliance.health import (
+    DEFAULT_NGINX_HEALTH_URL,
     REQUIRED_COMPONENTS,
     ApplianceHealthServer,
     HealthCheckError,
@@ -105,6 +106,7 @@ def test_collect_health_status_checks_api_and_nginx_responsiveness() -> None:
     assert status["api"]
     assert not status["nginx"]
     assert len(probed_urls) == 2
+    assert DEFAULT_NGINX_HEALTH_URL in probed_urls
     assert not is_healthy(status)
 
 
