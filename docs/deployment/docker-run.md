@@ -39,7 +39,7 @@ mkdir -p /volume1/docker/mediasync
 拉取并启动精确版本：
 
 ```bash
-docker pull josephyjq/mediasync:v0.2.0-rc.4
+docker pull josephyjq/mediasync:v0.2.0-rc.5
 
 docker run -d \
   --name mediasync \
@@ -47,7 +47,7 @@ docker run -d \
   -v /volume1/docker/mediasync:/data \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.4
+  josephyjq/mediasync:v0.2.0-rc.5
 ```
 
 打开：
@@ -69,7 +69,7 @@ docker run -d \
   -e ADMIN_PASSWORD='请替换为强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.4
+  josephyjq/mediasync:v0.2.0-rc.5
 ```
 
 显式密码不会写入日志。Shell 历史可能记录命令，介意时请使用环境变量文件或
@@ -81,7 +81,7 @@ NAS 的环境变量表单。
 |---|---:|---|
 | `ADMIN_USERNAME` | `admin` | 管理员用户名 |
 | `ADMIN_PASSWORD` | `admin` | 管理员密码；首次登录后必须改为强密码 |
-| `ADMIN_PASSWORD_DEFAULT_ONLY` | `true` | 仅让镜像默认密码作用于新数据目录 |
+| `IMAGE_DEFAULT_ADMIN_ONLY` | `true` | 仅让镜像默认密码作用于新数据目录 |
 | `SESSION_COOKIE_SECURE` | `false` | HTTPS 反向代理部署时设为 `true` |
 | `LOG_LEVEL` | `INFO` | 容器日志级别 |
 | `ALIYUNDRIVE_MODE` | `private_api` | 阿里云盘 Provider 模式 |
@@ -183,7 +183,7 @@ docker run -d \
   -e ADMIN_PASSWORD='rc.2 原值' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.4
+  josephyjq/mediasync:v0.2.0-rc.5
 ```
 
 密钥持久化成功后，后续重建容器可以不再重复传入两个加密密钥。

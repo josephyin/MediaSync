@@ -163,7 +163,7 @@ def test_image_default_admin_password_does_not_reset_existing_data(
         tmp_path,
         environment={
             "ADMIN_PASSWORD": "admin",
-            "ADMIN_PASSWORD_DEFAULT_ONLY": "true",
+            "IMAGE_DEFAULT_ADMIN_ONLY": "true",
         },
     )
 
@@ -188,7 +188,7 @@ def test_custom_admin_password_overrides_image_default_for_existing_data(
         tmp_path,
         environment={
             "ADMIN_PASSWORD": "new-strong-admin-password",
-            "ADMIN_PASSWORD_DEFAULT_ONLY": "true",
+            "IMAGE_DEFAULT_ADMIN_ONLY": "true",
         },
     )
 
