@@ -67,6 +67,7 @@
 | 变量 | 默认值 |
 |---|---|
 | `ADMIN_PASSWORD` | `admin` |
+| `ADMIN_PASSWORD_DEFAULT_ONLY` | `true` |
 | `SESSION_COOKIE_SECURE` | `false` |
 
 建议在创建容器时把管理员密码改为自己的强密码：
@@ -104,6 +105,9 @@ admin
 
 首次登录后必须使用强密码重建容器。默认密码只适用于受信任的局域网首次安装，
 不要把管理端口直接暴露到公网。
+
+升级已有 `/data` 时，镜像默认的 `admin` 不会覆盖已经保存的密码；只有用户显式
+填写其他 `ADMIN_PASSWORD` 才会重置密码。
 
 ## 8. 健康状态
 

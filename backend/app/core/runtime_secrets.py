@@ -16,6 +16,9 @@ DEFAULT_DATABASE_FILENAME = "mediasync.db"
 
 _MINIMUM_KEY_LENGTH = 16
 _MINIMUM_ADMIN_PASSWORD_LENGTH = 5
+_IMAGE_DEFAULT_ADMIN_PASSWORD = "admin"
+_IMAGE_DEFAULT_ADMIN_PASSWORD_FLAG = "ADMIN_PASSWORD_DEFAULT_ONLY"
+_TRUE_VALUES = {"1", "true", "yes", "on"}
 _SECRET_ENVIRONMENT_KEYS = {
     "secret_key": "SECRET_KEY",
     "credential_encryption_key": "CREDENTIAL_ENCRYPTION_KEY",
@@ -80,7 +83,9 @@ def prepare_runtime_secrets(
         current = _read_runtime_secrets(secrets_path)
         _validate_immutable_environment(current, runtime_environment)
 
-        requested_password = _environment_value(runtime_environment, "ADMIN_PASSWORD")
+        requested_password = _requested_admin_password_for_existing_data(
+            runtime_environment
+        )
         if requested_password is None or secrets.compare_digest(
             requested_password,
             current.admin_password,
@@ -284,6 +289,19 @@ def _database_files_exist(database_path: Path) -> bool:
 def _environment_value(environment: Mapping[str, str], name: str) -> str | None:
     value = environment.get(name)
     return value if value else None
+
+
+def _requested_admin_password_for_existing_data(
+    environment: Mapping[str, str],
+) -> str | None:
+    requested_password = _environment_value(environment, "ADMIN_PASSWORD")
+    default_only = (
+        environment.get(_IMAGE_DEFAULT_ADMIN_PASSWORD_FLAG, "").strip().lower()
+        in _TRUE_VALUES
+    )
+    if default_only and requested_password == _IMAGE_DEFAULT_ADMIN_PASSWORD:
+        return None
+    return requested_password
 
 
 def _required_string(payload: dict[str, Any], name: str) -> str:

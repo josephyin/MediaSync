@@ -208,6 +208,7 @@ def test_single_image_keeps_appliance_and_explicit_nginx_contracts() -> None:
     assert "EXPOSE 8080" in dockerfile
     assert "EXPOSE 80 8000" not in dockerfile
     assert "ADMIN_PASSWORD=admin" in dockerfile
+    assert "ADMIN_PASSWORD_DEFAULT_ONLY=true" in dockerfile
     assert "proxy_pass http://mediasync-api:8000;" in nginx
     assert "proxy_pass http://backend:8000;" not in nginx
     assert "proxy_pass http://127.0.0.1:8000;" in appliance_nginx
