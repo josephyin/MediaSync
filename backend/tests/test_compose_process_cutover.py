@@ -193,14 +193,17 @@ def test_frontend_uses_configurable_host_port(
     ]
 
 
-def test_single_image_and_nginx_have_single_process_responsibilities() -> None:
+def test_single_image_keeps_appliance_and_explicit_nginx_contracts() -> None:
     dockerfile = (REPOSITORY_ROOT / "Dockerfile").read_text()
     nginx = (REPOSITORY_ROOT / "deploy" / "nginx.conf").read_text()
+    appliance_nginx = (REPOSITORY_ROOT / "deploy" / "nginx-appliance.conf").read_text()
 
-    assert 'CMD ["uvicorn", "app.main:app"' in dockerfile
+    assert 'CMD ["python", "-m", "app.appliance"]' in dockerfile
+    assert 'CMD ["python", "-m", "app.appliance.healthcheck"]' in dockerfile
     assert "alembic upgrade head && uvicorn" not in dockerfile
     assert "supervisord" not in dockerfile.lower()
     assert "COPY --from=frontend-builder /build/dist /usr/share/nginx/html" in dockerfile
     assert "apt-get install --no-install-recommends --yes nginx" in dockerfile
     assert "proxy_pass http://mediasync-api:8000;" in nginx
     assert "proxy_pass http://backend:8000;" not in nginx
+    assert "proxy_pass http://127.0.0.1:8000;" in appliance_nginx

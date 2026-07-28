@@ -15,6 +15,10 @@ from pathlib import Path
 from types import FrameType
 from typing import Protocol
 
+from app.appliance.health import (
+    DEFAULT_HEALTH_SOCKET_PATH,
+    ApplianceHealthServer,
+)
 from app.core.runtime_secrets import RuntimeSecretsError, prepare_runtime_secrets
 
 logger = logging.getLogger(__name__)
@@ -73,7 +77,13 @@ API = ProcessSpec(
 )
 NGINX = ProcessSpec(
     name="nginx",
-    command=("nginx", "-g", "daemon off;"),
+    command=(
+        "nginx",
+        "-g",
+        "daemon off;",
+        "-c",
+        "/etc/nginx/nginx-appliance.conf",
+    ),
     shutdown_timeout_seconds=10,
 )
 SCHEDULER = ProcessSpec(
@@ -165,6 +175,7 @@ class ApplianceLauncher:
         api_startup_timeout_seconds: float = 30,
         supervision_poll_seconds: float = 0.5,
         sleep: Sleep = time.sleep,
+        health_socket_path: Path = DEFAULT_HEALTH_SOCKET_PATH,
     ) -> None:
         if api_startup_timeout_seconds <= 0:
             raise ValueError("api_startup_timeout_seconds must be positive")
@@ -179,6 +190,8 @@ class ApplianceLauncher:
         self._api_startup_timeout_seconds = api_startup_timeout_seconds
         self._supervision_poll_seconds = supervision_poll_seconds
         self._sleep = sleep
+        self._health_socket_path = Path(health_socket_path)
+        self._health_server: ApplianceHealthServer | None = None
         self._children: dict[str, tuple[ProcessSpec, ManagedProcess]] = {}
 
     def prepare_environment(self) -> dict[str, str]:
@@ -231,6 +244,7 @@ class ApplianceLauncher:
             )
             for spec in STARTUP_SPECS:
                 self._start(spec, environment)
+            self._start_health_server()
 
             logger.info(
                 "appliance_started child_processes=%s",
@@ -245,6 +259,7 @@ class ApplianceLauncher:
             exit_code = 1
         finally:
             cleanup_signals()
+            self._stop_health_server()
             self._shutdown_children()
 
         logger.info("appliance_stopped exit_code=%d", exit_code)
@@ -277,6 +292,9 @@ class ApplianceLauncher:
 
     def _supervise(self, stop: threading.Event) -> int:
         while not stop.is_set():
+            if self._health_server is None or not self._health_server.is_running:
+                logger.error("appliance_health_server_exited")
+                return 1
             for name, (_spec, process) in self._children.items():
                 return_code = process.poll()
                 if return_code is not None:
@@ -286,9 +304,43 @@ class ApplianceLauncher:
                         process.pid,
                         return_code,
                     )
+                    if return_code < 0:
+                        return 128 + abs(return_code)
                     return return_code if return_code != 0 else 1
             self._sleep(self._supervision_poll_seconds)
         return 0
+
+    def _start_health_server(self) -> None:
+        health_server = ApplianceHealthServer(
+            socket_path=self._health_socket_path,
+            status_provider=self._component_status,
+        )
+        self._health_server = health_server
+        try:
+            health_server.start()
+        except Exception:
+            health_server.stop()
+            self._health_server = None
+            raise
+        logger.info(
+            "appliance_health_server_started socket=%s",
+            self._health_socket_path,
+        )
+
+    def _stop_health_server(self) -> None:
+        if self._health_server is None:
+            return
+        self._health_server.stop()
+        self._health_server = None
+
+    def _component_status(self) -> dict[str, bool]:
+        return {
+            "launcher": True,
+            **{
+                name: process.poll() is None
+                for name, (_spec, process) in self._children.items()
+            },
+        }
 
     def _shutdown_children(self) -> None:
         if not self._children:

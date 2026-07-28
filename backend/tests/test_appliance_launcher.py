@@ -6,6 +6,7 @@ import subprocess
 import threading
 from collections.abc import Mapping
 from pathlib import Path
+from uuid import uuid4
 
 from app.appliance.launcher import (
     API,
@@ -67,6 +68,10 @@ def appliance_environment() -> dict[str, str]:
         "CREDENTIAL_ENCRYPTION_KEY": CREDENTIAL_KEY,
         "ADMIN_PASSWORD": ADMIN_PASSWORD,
     }
+
+
+def short_socket_path() -> Path:
+    return Path.cwd() / f".launcher-{uuid4().hex[:12]}.sock"
 
 
 def test_prepare_environment_persists_required_runtime_values(
@@ -166,6 +171,7 @@ def test_launcher_runs_barriers_then_starts_processes_in_contract_order(
         api_waiter=api_waiter,
         api_startup_timeout_seconds=12,
         sleep=sleep,
+        health_socket_path=short_socket_path(),
     )
 
     exit_code = launcher.run(stop=stop, install_signal_handlers=False)
@@ -254,7 +260,7 @@ def test_critical_child_exit_stops_remaining_processes_and_fails(
         spec: ProcessSpec,
         _environment: Mapping[str, str],
     ) -> FakeProcess:
-        exit_code = 9 if spec.name == SCHEDULER.name else None
+        exit_code = -9 if spec.name == SCHEDULER.name else None
         return FakeProcess(spec.name, events, pid=123, exit_code=exit_code)
 
     launcher = ApplianceLauncher(
@@ -264,11 +270,12 @@ def test_critical_child_exit_stops_remaining_processes_and_fails(
         process_factory=process_factory,
         api_waiter=lambda _process, _timeout: None,
         sleep=lambda _seconds: None,
+        health_socket_path=short_socket_path(),
     )
 
     exit_code = launcher.run(install_signal_handlers=False)
 
-    assert exit_code == 9
+    assert exit_code == 137
     assert [event for event in events if event.startswith("terminate:")] == [
         "terminate:nginx",
         "terminate:worker",
@@ -303,6 +310,7 @@ def test_shutdown_force_kills_process_after_its_grace_period(
         process_factory=process_factory,
         api_waiter=lambda _process, _timeout: None,
         sleep=sleep,
+        health_socket_path=short_socket_path(),
     )
 
     exit_code = launcher.run(stop=stop, install_signal_handlers=False)
@@ -327,7 +335,13 @@ def test_child_commands_are_explicit_argument_lists() -> None:
         "--workers",
         "1",
     )
-    assert NGINX.command == ("nginx", "-g", "daemon off;")
+    assert NGINX.command == (
+        "nginx",
+        "-g",
+        "daemon off;",
+        "-c",
+        "/etc/nginx/nginx-appliance.conf",
+    )
     assert SCHEDULER.command[-2:] == ("-m", "app.scheduler")
     assert WORKER.command[-2:] == ("-m", "app.worker")
 
