@@ -70,7 +70,8 @@ docker run -d \
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
 必须把整个目录作为一个整体。详细说明见
 [Docker 单容器部署](docs/deployment/docker-run.md)；飞牛用户见
-[飞牛 fnOS 安装教程](docs/deployment/fnos.md)。
+[飞牛 fnOS 安装教程](docs/deployment/fnos.md)，群晖用户见
+[群晖 DSM 安装教程](docs/deployment/synology.md)。
 
 > 默认配置适用于局域网 HTTP，不要把管理端口直接暴露到公网。通过 HTTPS
 > 反向代理访问时，请增加 `-e SESSION_COOKIE_SECURE=true`。

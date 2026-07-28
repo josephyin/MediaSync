@@ -13,8 +13,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DEFAULT_HEALTH_SOCKET_PATH = Path("/run/mediasync/health.sock")
-DEFAULT_NGINX_HEALTH_URL = "http://127.0.0.1:8080/"
-DEFAULT_API_HEALTH_URL = "http://127.0.0.1:8000/api/v1/system/health"
+DEFAULT_NGINX_HEALTH_URL = "http://127.0.0.1:8080/api/v1/system/health"
 REQUIRED_COMPONENTS = ("launcher", "nginx", "api", "scheduler", "worker")
 MAX_HEALTH_RESPONSE_BYTES = 16 * 1024
 
@@ -200,14 +199,12 @@ def collect_health_status(
         socket_path,
         timeout_seconds=timeout_seconds,
     )
-    status["api"] = status["api"] and http_probe(
-        DEFAULT_API_HEALTH_URL,
-        timeout_seconds,
-    )
-    status["nginx"] = status["nginx"] and http_probe(
+    web_healthy = http_probe(
         DEFAULT_NGINX_HEALTH_URL,
         timeout_seconds,
     )
+    status["api"] = status["api"] and web_healthy
+    status["nginx"] = status["nginx"] and web_healthy
     return status
 
 

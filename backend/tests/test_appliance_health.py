@@ -82,7 +82,7 @@ def test_health_server_refuses_to_replace_regular_file() -> None:
     socket_path.unlink()
 
 
-def test_collect_health_status_checks_api_and_nginx_responsiveness() -> None:
+def test_collect_health_status_checks_api_through_nginx_once() -> None:
     socket_path = short_socket_path()
     server = ApplianceHealthServer(
         socket_path=socket_path,
@@ -92,7 +92,7 @@ def test_collect_health_status_checks_api_and_nginx_responsiveness() -> None:
 
     def http_probe(url: str, _timeout_seconds: float) -> bool:
         probed_urls.append(url)
-        return ":8000/" in url
+        return True
 
     server.start()
     try:
@@ -104,9 +104,29 @@ def test_collect_health_status_checks_api_and_nginx_responsiveness() -> None:
         server.stop()
 
     assert status["api"]
+    assert status["nginx"]
+    assert probed_urls == [DEFAULT_NGINX_HEALTH_URL]
+    assert is_healthy(status)
+
+
+def test_failed_nginx_api_probe_marks_both_components_unhealthy() -> None:
+    socket_path = short_socket_path()
+    server = ApplianceHealthServer(
+        socket_path=socket_path,
+        status_provider=lambda: {name: True for name in REQUIRED_COMPONENTS},
+    )
+
+    server.start()
+    try:
+        status = collect_health_status(
+            socket_path,
+            http_probe=lambda _url, _timeout_seconds: False,
+        )
+    finally:
+        server.stop()
+
+    assert not status["api"]
     assert not status["nginx"]
-    assert len(probed_urls) == 2
-    assert DEFAULT_NGINX_HEALTH_URL in probed_urls
     assert not is_healthy(status)
 
 

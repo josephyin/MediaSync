@@ -43,7 +43,7 @@ VOLUME ["/data"]
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
     CMD ["python", "-m", "app.appliance.healthcheck"]
 
 CMD ["python", "-m", "app.appliance"]
