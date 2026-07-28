@@ -109,14 +109,20 @@ Nginx → Scheduler → Worker → API
 
 ## 7. Tag 发布后验证
 
-以下项目必须在 Tag 工作流完成后继续验证：
+已确认：
 
-- Docker Hub `v0.2.0-rc.3` 的 `linux/amd64` 和 `linux/arm64` 清单；
-- GHCR `v0.2.0-rc.3` 的 `linux/amd64` 和 `linux/arm64` 清单；
-- 两个仓库的 `rc` 浮动标签；
-- Docker Hub 中文 Overview 同步结果；
-- 未登录状态下从 Docker Hub 和 GHCR 拉取精确标签；
+- Tag 工作流已经把 `v0.2.0-rc.3` 和 `rc` 推送到 Docker Hub 与 GHCR；
+- Docker Hub 和 GHCR 的精确标签、`rc` 标签均包含 `linux/amd64` 和
+  `linux/arm64`；
+- 四个标签指向同一个 OCI 索引摘要
+  `sha256:aa59ba849912ca31706cfcaaecabc104c27b717aa92bd8955c2a65a31687df9e`；
+- 使用空 Docker 凭证目录可以读取 Docker Hub 和 GHCR 的精确标签；
+- Docker Hub 中文 Overview 已在仓库页面手动同步；
+- Overview 自动同步使用的 Token 能推送镜像，但 Docker Hub 返回
+  `Forbidden`，工作流已调整为警告而不阻断镜像发布。
+
+仍需在发布后继续验证：
+
 - 飞牛 fnOS 图形界面的真实拉取、端口映射、目录映射和首次登录。
 
-飞牛图形界面验证需要已发布的远端精确标签，因此作为 Release PR 合并后的发布
-验收项执行，不用本地临时镜像代替。
+飞牛图形界面验证必须使用已发布的远端精确标签，不用本地临时镜像代替。
