@@ -1,6 +1,6 @@
 # v0.2.0-rc.3 单容器 Appliance 模式设计
 
-- 状态：草案
+- 状态：已接受
 - 目标版本：v0.2.0-rc.3
 - 范围：默认容器入口、进程监管、首次启动、持久化配置、健康检查和部署兼容性
 - 依据：[ADR-0004：默认单容器 Appliance，保留多进程职责边界](adr/ADR-0004-single-container-appliance.md)
