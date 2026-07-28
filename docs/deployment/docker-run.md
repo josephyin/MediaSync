@@ -81,12 +81,17 @@ NAS 的环境变量表单。
 |---|---:|---|
 | `ADMIN_USERNAME` | `admin` | 管理员用户名 |
 | `ADMIN_PASSWORD` | `admin` | 管理员密码；首次登录后必须改为强密码 |
+| `ADMIN_PASSWORD_DEFAULT_ONLY` | `true` | 仅让镜像默认密码作用于新数据目录 |
 | `SESSION_COOKIE_SECURE` | `false` | HTTPS 反向代理部署时设为 `true` |
 | `LOG_LEVEL` | `INFO` | 容器日志级别 |
 | `ALIYUNDRIVE_MODE` | `private_api` | 阿里云盘 Provider 模式 |
 
 普通首次安装不需要手工配置 `SECRET_KEY` 和
 `CREDENTIAL_ENCRYPTION_KEY`。Appliance 会安全生成并持久化它们。
+
+镜像默认的 `admin` 密码只用于全新的 `/data`。已有数据目录中保存的管理员
+密码不会在升级时被默认值覆盖；显式填写其他 `ADMIN_PASSWORD` 仍会执行离线
+密码重置。
 
 不要在已有数据库的情况下删除 `/data/config/runtime-secrets.json`。如果从旧
 版本迁移数据库且该文件还不存在，第一次启动必须同时提供原来的

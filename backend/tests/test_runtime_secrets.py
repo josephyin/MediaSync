@@ -147,6 +147,55 @@ def test_explicit_admin_password_resets_and_persists_offline(tmp_path: Path) -> 
     assert reloaded.values == reset.values
 
 
+def test_image_default_admin_password_does_not_reset_existing_data(
+    tmp_path: Path,
+) -> None:
+    first = prepare_runtime_secrets(
+        tmp_path,
+        environment={
+            "SECRET_KEY": SECRET_KEY,
+            "CREDENTIAL_ENCRYPTION_KEY": CREDENTIAL_KEY,
+            "ADMIN_PASSWORD": ADMIN_PASSWORD,
+        },
+    )
+
+    restarted = prepare_runtime_secrets(
+        tmp_path,
+        environment={
+            "ADMIN_PASSWORD": "admin",
+            "ADMIN_PASSWORD_DEFAULT_ONLY": "true",
+        },
+    )
+
+    assert restarted.created is False
+    assert restarted.admin_password_updated is False
+    assert restarted.values == first.values
+
+
+def test_custom_admin_password_overrides_image_default_for_existing_data(
+    tmp_path: Path,
+) -> None:
+    prepare_runtime_secrets(
+        tmp_path,
+        environment={
+            "SECRET_KEY": SECRET_KEY,
+            "CREDENTIAL_ENCRYPTION_KEY": CREDENTIAL_KEY,
+            "ADMIN_PASSWORD": ADMIN_PASSWORD,
+        },
+    )
+
+    restarted = prepare_runtime_secrets(
+        tmp_path,
+        environment={
+            "ADMIN_PASSWORD": "new-strong-admin-password",
+            "ADMIN_PASSWORD_DEFAULT_ONLY": "true",
+        },
+    )
+
+    assert restarted.admin_password_updated is True
+    assert restarted.values.admin_password == "new-strong-admin-password"
+
+
 @pytest.mark.parametrize("database_suffix", ["", "-wal", "-shm"])
 def test_existing_database_files_require_original_cryptographic_keys(
     tmp_path: Path,
