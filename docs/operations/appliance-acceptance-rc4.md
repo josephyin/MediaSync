@@ -50,10 +50,22 @@
 
 ## 5. Tag 发布后验证
 
-发布 `v0.2.0-rc.4` 后继续确认：
+已确认：
 
-- Docker Hub 和 GHCR 同时包含 `linux/amd64`、`linux/arm64`；
-- 两个仓库的精确标签和 `rc` 标签摘要一致；
-- 未登录状态可以读取精确标签；
-- Docker Hub 中文 Overview 已更新；
-- 飞牛 fnOS 创建容器表单显示预期默认值。
+- GitHub Actions 镜像发布工作流成功；
+- Docker Hub 和 GHCR 的精确标签均包含 `linux/amd64`、`linux/arm64`；
+- 两个仓库的 `v0.2.0-rc.4` 和 `rc` 均指向 OCI 索引摘要
+  `sha256:7c7836f535fb2c7b9674ca97f016459288f481d8e6589b248b03fc45bbb6c75f`；
+- 使用空 Docker 凭证目录可以读取两个仓库的精确标签；
+- 从 Docker Hub 拉取的远程镜像只声明 `8080/tcp`、`/data` 和
+  `ADMIN_PASSWORD=admin`；
+- Docker Hub 中文 Overview 已手动更新为 rc.4；
+- Docker Hub Overview 自动同步仍因 Token 权限返回 `Forbidden`，但工作流按
+  设计降级为警告，不影响镜像发布成功。
+
+仍需在目标设备确认：
+
+- 飞牛 fnOS 创建容器表单显示一条 `8080` 端口映射；
+- 存储映射自动显示容器路径 `/data`，宿主机路径为空；
+- 环境变量自动显示 `ADMIN_PASSWORD=admin`；
+- 使用飞牛表单创建的容器可以健康启动并登录。
