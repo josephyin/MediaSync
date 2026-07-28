@@ -94,3 +94,4 @@ ADR-0002-task-execution-model.md
 | [ADR-0001](ADR-0001-single-worker-on-sqlite.md) | SQLite 单 Worker | 已接受 |
 | [ADR-0002](ADR-0002-task-execution-model.md) | 任务执行模型 | 已接受 |
 | [ADR-0003](ADR-0003-single-release-image.md) | 单一发布镜像，多进程容器拓扑 | 已接受 |
+| [ADR-0004](ADR-0004-single-container-appliance.md) | 默认单容器 Appliance，保留多进程职责边界 | 提议中 |
