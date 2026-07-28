@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "MediaSync"
-    app_version: str = "0.2.0-rc.1"
+    app_version: str = "0.2.0-rc.2"
     environment: str = "development"
     api_prefix: str = "/api/v1"
     database_url: str = "sqlite:///./data/mediasync.db"
