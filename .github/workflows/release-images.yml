@@ -74,6 +74,16 @@ jobs:
           cache-from: type=gha,scope=mediasync
           cache-to: type=gha,mode=max,scope=mediasync
 
+      - name: 更新 Docker Hub 中文说明
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/mediasync
+          short-description: 自托管的家庭影音云盘订阅同步服务
+          readme-filepath: ./docs/dockerhub-overview.md
+          enable-url-completion: true
+
   mirror-existing:
     name: 同步 MediaSync 单镜像
     if: github.event_name == 'workflow_dispatch'
