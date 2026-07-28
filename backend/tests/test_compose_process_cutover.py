@@ -15,6 +15,7 @@ BACKEND_SERVICES = {
     "mediasync-scheduler",
     "mediasync-worker",
 }
+ALL_SERVICES = BACKEND_SERVICES | {"frontend"}
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +63,7 @@ def test_compose_defines_process_topology(
 ) -> None:
     services = compose_config["services"]
     assert isinstance(services, dict)
-    assert set(services) == BACKEND_SERVICES | {"frontend"}
+    assert set(services) == ALL_SERVICES
 
     assert service(compose_config, "mediasync-migrate")["command"] == [
         "alembic",
@@ -83,6 +84,11 @@ def test_compose_defines_process_topology(
         "python",
         "-m",
         "app.worker",
+    ]
+    assert service(compose_config, "frontend")["command"] == [
+        "nginx",
+        "-g",
+        "daemon off;",
     ]
     api_command = service(compose_config, "mediasync-api")["command"]
     assert isinstance(api_command, list)
@@ -119,11 +125,29 @@ def test_compose_enforces_migration_and_reconciliation_barriers(
     }
 
 
+def test_all_services_share_one_release_image(
+    compose_config: dict[str, object],
+) -> None:
+    images = {
+        str(service(compose_config, process_name)["image"])
+        for process_name in ALL_SERVICES
+    }
+    assert images == {"mediasync:local"}
+
+    builds = {
+        (
+            str(service(compose_config, process_name)["build"]["context"]),
+            str(service(compose_config, process_name)["build"]["dockerfile"]),
+        )
+        for process_name in ALL_SERVICES
+    }
+    assert builds == {(str(REPOSITORY_ROOT), "Dockerfile")}
+
+
 def test_all_backend_services_share_process_mode_and_sqlite_volume(
     compose_config: dict[str, object],
 ) -> None:
     volumes: set[tuple[str, str]] = set()
-    images: set[str] = set()
     for process_name in BACKEND_SERVICES:
         process = service(compose_config, process_name)
         environment = process["environment"]
@@ -137,10 +161,12 @@ def test_all_backend_services_share_process_mode_and_sqlite_volume(
         volume = process_volumes[0]
         assert isinstance(volume, dict)
         volumes.add((str(volume["source"]), str(volume["target"])))
-        images.add(str(process["image"]))
 
     assert volumes == {("mediasync-data", "/data")}
-    assert images == {"mediasync-backend:local"}
+
+    frontend = service(compose_config, "frontend")
+    assert "environment" not in frontend
+    assert "volumes" not in frontend
 
 
 def test_sqlite_topology_declares_one_scheduler_and_worker(
@@ -152,11 +178,29 @@ def test_sqlite_topology_declares_one_scheduler_and_worker(
         assert deploy["replicas"] == 1
 
 
-def test_backend_image_and_nginx_have_single_process_responsibilities() -> None:
-    dockerfile = (REPOSITORY_ROOT / "backend" / "Dockerfile").read_text()
+def test_frontend_uses_configurable_host_port(
+    compose_config: dict[str, object],
+) -> None:
+    ports = service(compose_config, "frontend")["ports"]
+    assert isinstance(ports, list)
+    assert ports == [
+        {
+            "mode": "ingress",
+            "target": 80,
+            "published": "8080",
+            "protocol": "tcp",
+        }
+    ]
+
+
+def test_single_image_and_nginx_have_single_process_responsibilities() -> None:
+    dockerfile = (REPOSITORY_ROOT / "Dockerfile").read_text()
     nginx = (REPOSITORY_ROOT / "deploy" / "nginx.conf").read_text()
 
     assert 'CMD ["uvicorn", "app.main:app"' in dockerfile
     assert "alembic upgrade head && uvicorn" not in dockerfile
+    assert "supervisord" not in dockerfile.lower()
+    assert "COPY --from=frontend-builder /build/dist /usr/share/nginx/html" in dockerfile
+    assert "apt-get install --no-install-recommends --yes nginx" in dockerfile
     assert "proxy_pass http://mediasync-api:8000;" in nginx
     assert "proxy_pass http://backend:8000;" not in nginx

@@ -1,8 +1,12 @@
-x-mediasync-backend: &mediasync-backend
+x-mediasync-image: &mediasync-image
   build:
-    context: ./backend
-  image: ${MEDIASYNC_BACKEND_IMAGE:-mediasync-backend}:${MEDIASYNC_IMAGE_TAG:-local}
+    context: .
+    dockerfile: Dockerfile
+  image: ${MEDIASYNC_IMAGE:-mediasync}:${MEDIASYNC_IMAGE_TAG:-local}
   init: true
+
+x-mediasync-backend: &mediasync-backend
+  <<: *mediasync-image
   environment:
     ENVIRONMENT: production
     DATABASE_URL: sqlite:////data/mediasync.db
@@ -105,16 +109,24 @@ services:
       replicas: 1
 
   frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    image: ${MEDIASYNC_FRONTEND_IMAGE:-mediasync-frontend}:${MEDIASYNC_IMAGE_TAG:-local}
+    <<: *mediasync-image
+    command: ["nginx", "-g", "daemon off;"]
     restart: unless-stopped
     depends_on:
       mediasync-api:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost/')
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     ports:
-      - "8080:80"
+      - "${MEDIASYNC_HTTP_PORT:-8080}:80"
 
 volumes:
   mediasync-data:

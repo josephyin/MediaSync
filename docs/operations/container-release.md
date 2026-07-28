@@ -1,16 +1,19 @@
 # 容器镜像发布手册
 
-MediaSync 的容器镜像通过 GitHub Actions 同时发布到 GitHub Container
-Registry（GHCR）和 Docker Hub。
+MediaSync 的容器镜像通过 GitHub Actions 从同一次构建同时发布到 GitHub
+Container Registry（GHCR）和 Docker Hub。
 
 ## 镜像
 
-v0.2.0-rc.1 使用两个镜像：
+从 v0.2.0-rc.2 开始，每个版本只使用一个 `mediasync` 镜像。迁移、对账、API、
+Scheduler、Worker 和 frontend 容器通过不同命令复用它。
 
-- `mediasync-backend`：供迁移、对账、API、Scheduler 和 Worker 复用；
-- `mediasync-frontend`：Nginx 和 Vue 管理后台。
+v0.2.0-rc.1 是双镜像历史版本：
 
-每个版本同时发布 `linux/amd64` 和 `linux/arm64`。
+- `mediasync-backend`
+- `mediasync-frontend`
+
+所有镜像都发布 `linux/amd64` 和 `linux/arm64`。
 
 ## GitHub Secrets
 
@@ -32,11 +35,11 @@ Access Token 只能保存在 GitHub Secrets 中，不得写入仓库、Issue、P
 
 ## 同步既有版本
 
-对于工作流升级前已经存在于 GHCR 的版本，在 GitHub Actions 页面手动运行
-`发布容器镜像`，填写已有标签，例如：
+对于已经存在于 GHCR、但尚未进入 Docker Hub 的单镜像版本，在 GitHub Actions
+页面手动运行 `发布容器镜像`，填写已有标签，例如：
 
 ```text
-v0.2.0-rc.1
+v0.2.0-rc.2
 ```
 
 手动同步不会重新构建镜像。工作流会复制 GHCR 中的多架构 OCI 索引到 Docker
@@ -47,8 +50,7 @@ Hub，避免改变既有版本的代码或依赖。
 同步完成后，在未登录 Docker Hub 的环境检查两个多架构清单：
 
 ```bash
-docker manifest inspect <用户名>/mediasync-backend:v0.2.0-rc.1
-docker manifest inspect <用户名>/mediasync-frontend:v0.2.0-rc.1
+docker manifest inspect <用户名>/mediasync:v0.2.0-rc.2
 ```
 
 清单必须同时包含：

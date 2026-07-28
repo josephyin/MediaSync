@@ -9,6 +9,7 @@ export SECRET_KEY=${SECRET_KEY:-compose-smoke-secret-key}
 export CREDENTIAL_ENCRYPTION_KEY=${CREDENTIAL_ENCRYPTION_KEY:-compose-smoke-credential-key}
 export ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
 export ADMIN_PASSWORD=${ADMIN_PASSWORD:-compose-smoke-password}
+export MEDIASYNC_HTTP_PORT=${MEDIASYNC_HTTP_PORT:-18080}
 
 compose() {
     docker compose \
@@ -42,7 +43,7 @@ if [ -n "$database_copy" ]; then
         /data/mediasync.db
 fi
 
-compose up -d mediasync-api mediasync-scheduler mediasync-worker
+compose up -d mediasync-api mediasync-scheduler mediasync-worker frontend
 
 health_attempt=0
 until compose exec -T mediasync-api python -c \
@@ -53,6 +54,20 @@ do
     if [ "$health_attempt" -ge 30 ]; then
         compose logs --no-color mediasync-api
         echo "API did not become healthy within 30 seconds" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+frontend_attempt=0
+until compose exec -T frontend python -c \
+    "import urllib.request; urllib.request.urlopen('http://localhost/')" \
+    >/dev/null 2>&1
+do
+    frontend_attempt=$((frontend_attempt + 1))
+    if [ "$frontend_attempt" -ge 30 ]; then
+        compose logs --no-color frontend
+        echo "Frontend did not become healthy within 30 seconds" >&2
         exit 1
     fi
     sleep 1
@@ -74,10 +89,24 @@ test "$(docker inspect -f '{{.State.ExitCode}}' "$cutover_id")" = "0"
 api_logs=$(compose logs --no-color mediasync-api)
 scheduler_logs=$(compose logs --no-color mediasync-scheduler)
 worker_logs=$(compose logs --no-color mediasync-worker)
+frontend_logs=$(compose logs --no-color frontend)
 
 echo "$api_logs" | grep "background_execution_mode_selected process=api mode=process"
 echo "$scheduler_logs" | grep "scheduler_started"
 echo "$worker_logs" | grep "worker_started"
+echo "$frontend_logs" | grep -v "emerg" >/dev/null
+
+expected_image=$(compose images -q mediasync-api)
+for service_name in \
+    mediasync-migrate \
+    mediasync-cutover \
+    mediasync-api \
+    mediasync-scheduler \
+    mediasync-worker \
+    frontend
+do
+    test "$(compose images -q "$service_name")" = "$expected_image"
+done
 
 if echo "$api_logs" | grep -E "Scheduler started|legacy transfer" >/dev/null; then
     echo "Legacy executor log detected in process-mode API" >&2
