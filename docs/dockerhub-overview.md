@@ -1,0 +1,83 @@
+# MediaSync
+
+自托管的家庭影音云盘订阅同步服务。
+
+MediaSync 定时检查资源分享目录，把新增文件增量转存到个人云盘，并可配合
+OpenList、SmartStrm、MoviePilot、Emby、Jellyfin 和飞牛影视构建自动影音库。
+
+## 支持状态
+
+- ✅ 阿里云盘
+- ⬜ 夸克网盘
+- ⬜ 115
+- ⬜ OneDrive
+
+当前为候选版本，阿里云盘 Web 私有接口属于实验能力，可能因上游变化或账号
+风控失效。
+
+## 一条命令启动
+
+```bash
+mkdir -p /你的路径/mediasync
+
+docker run -d \
+  --name mediasync \
+  -p 8080:80 \
+  -v /你的路径/mediasync:/data \
+  --restart unless-stopped \
+  --stop-timeout 120 \
+  josephyjq/mediasync:v0.2.0-rc.3
+```
+
+打开 `http://NAS_IP:8080`，用户名为 `admin`。首次自动生成的密码只在第一次
+启动日志中出现：
+
+```bash
+docker logs mediasync 2>&1 | grep appliance_initial_admin_password
+```
+
+也可以首次启动时设置：
+
+```text
+ADMIN_PASSWORD=你的强密码
+```
+
+## 必须配置
+
+| 类型 | 配置 |
+|---|---|
+| 端口 | 宿主机 `8080` → 容器 `80` |
+| 存储 | 宿主机数据目录 → 容器 `/data`，读写 |
+| 重启策略 | `unless-stopped` |
+
+不需要特权模式，不需要 Docker Socket，不需要映射内部 API 端口 `8000`。
+
+## 数据与备份
+
+`/data` 同时保存 SQLite 数据库和凭证密钥。停止容器后备份整个宿主机数据目录，
+不要只备份数据库文件。
+
+## HTTP 与 HTTPS
+
+默认 `SESSION_COOKIE_SECURE=false`，适用于受信任的局域网 HTTP。不要把管理
+端口直接暴露到公网。
+
+通过 HTTPS 反向代理访问时设置：
+
+```text
+SESSION_COOKIE_SECURE=true
+```
+
+## 健康检查
+
+镜像健康检查同时确认 Launcher、Nginx、API、Scheduler 和 Worker。任一关键
+进程异常退出时，容器会整体非零退出，再由 Docker 重启策略恢复。
+
+## 更多文档
+
+- GitHub：https://github.com/josephyin/MediaSync
+- Docker 部署：https://github.com/josephyin/MediaSync/blob/main/docs/deployment/docker-run.md
+- 飞牛 fnOS：https://github.com/josephyin/MediaSync/blob/main/docs/deployment/fnos.md
+- 问题反馈：https://github.com/josephyin/MediaSync/issues
+
+许可证：MIT

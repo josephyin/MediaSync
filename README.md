@@ -15,7 +15,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前版本为 `v0.2.0-rc.2`。该版本使用一个 OCI 镜像承载全部应用文件，但 API、Scheduler、Worker、Nginx 仍运行在职责独立的容器中。版本仍处于稳定性观察期，默认 Web 私有接口可能随上游更新失效。
+> 当前候选版本为 `v0.2.0-rc.3`。普通用户可以用一个容器直接运行；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。版本仍处于稳定性观察期，默认 Web 私有接口可能随上游更新失效。
 
 ## MVP 功能
 
@@ -27,7 +27,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - 幂等转存任务和失败重试
 - 文件记录、转存历史和任务日志
 - Provider 注册机制
-- Docker Compose 部署
+- 单容器 Docker 部署与高级 Docker Compose 部署
 
 ## 技术栈
 
@@ -37,26 +37,64 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 
 ## 快速开始
 
-### Docker Compose
+### Docker 单容器（推荐）
+
+```bash
+mkdir -p /你的路径/mediasync
+
+docker run -d \
+  --name mediasync \
+  -p 8080:80 \
+  -v /你的路径/mediasync:/data \
+  --restart unless-stopped \
+  --stop-timeout 120 \
+  josephyjq/mediasync:v0.2.0-rc.3
+```
+
+访问 `http://NAS_IP:8080`，管理员用户名为 `admin`。首次自动生成的密码只会在
+第一次启动日志中显示一次：
+
+```bash
+docker logs mediasync 2>&1 | grep appliance_initial_admin_password
+```
+
+也可以在首次启动时直接指定密码：
+
+```bash
+docker run -d \
+  --name mediasync \
+  -p 8080:80 \
+  -v /你的路径/mediasync:/data \
+  -e ADMIN_PASSWORD='你的强密码' \
+  --restart unless-stopped \
+  --stop-timeout 120 \
+  josephyjq/mediasync:v0.2.0-rc.3
+```
+
+数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
+必须把整个目录作为一个整体。详细说明见
+[Docker 单容器部署](docs/deployment/docker-run.md)；飞牛用户见
+[飞牛 fnOS 安装教程](docs/deployment/fnos.md)。
+
+> 默认配置适用于局域网 HTTP，不要把管理端口直接暴露到公网。通过 HTTPS
+> 反向代理访问时，请增加 `-e SESSION_COOKIE_SECURE=true`。
+
+### Docker Compose（高级）
+
+需要职责级容器隔离、开发调试或显式控制每个进程时，可以继续使用官方 Compose：
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`，至少替换以下内容：
+编辑 `.env`，至少替换密钥和管理员密码，并按需使用预构建镜像：
 
 ```dotenv
 SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
-ALIYUNDRIVE_MODE=private_api
-```
-
-使用 GitHub Container Registry 中的预构建镜像：
-
-```dotenv
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.2
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.3
 ```
 
 ```bash
@@ -64,13 +102,8 @@ docker compose pull
 docker compose up -d --no-build
 ```
 
-也可以从当前源码构建：
-
-```bash
-docker compose up -d --build
-```
-
-访问 `http://localhost:8080`，使用 `.env` 中的管理员账号登录。SQLite 数据保存在 Docker volume `mediasync-data`。
+源码构建仍可使用 `docker compose up -d --build`。Appliance 与 Compose 不得同时
+访问同一个 SQLite 数据库。
 
 ### 本地开发
 
@@ -99,10 +132,10 @@ npm run dev
 ## 项目结构
 
 ```text
-backend/       FastAPI、SQLAlchemy、Provider、调度和测试
+backend/       FastAPI、SQLAlchemy、Task Engine、Provider、Appliance 和测试
 frontend/      Vue 3 管理后台
 deploy/        Nginx 配置
-docs/          架构和开发文档
+docs/          架构、部署和开发文档
 docker-compose.yml
 ```
 
@@ -113,8 +146,10 @@ docker-compose.yml
 - 私有/Open refresh token、Open Client Secret 和分享密码使用 `CREDENTIAL_ENCRYPTION_KEY` 加密后存入 SQLite。
 - 私有接口模式支持在 MediaSync 本机生成阿里云盘登录二维码；扫码确认后 token 由后端直接加密保存，不经过第三方取 token 服务。
 - 管理 API 使用签名的 HttpOnly Cookie；公网部署必须在反向代理层启用 HTTPS。
+- Appliance 默认使用局域网 HTTP Cookie；HTTPS 部署必须设置 `SESSION_COOKIE_SECURE=true`。
 - 不要提交 `.env`、数据库、日志或真实第三方凭证。
 - 修改 `CREDENTIAL_ENCRYPTION_KEY` 会导致已有凭证无法解密。
+- `/data/mediasync.db*` 和 `/data/config/runtime-secrets.json` 是不可分割的备份单元。
 - `private_api` 会模拟 Aliyun Drive Web 客户端调用未公开接口，存在接口变更、限流和账号风控风险；请只操作自己有权访问的账号与分享内容。
 
 ## Provider 开发
@@ -167,6 +202,7 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 完成 `v0.1` 功能 MVP
 - [x] 发布 `v0.2.0-rc.1` 可靠性基础预发布版
 - [x] 发布 `v0.2.0-rc.2` 单镜像部署预发布版
+- [ ] 发布 `v0.2.0-rc.3` 单容器 Appliance 预发布版
 - [ ] 完成 v0.2 八周稳定性观察
 - [ ] 发布 `v0.2.0` 正式版
 - [ ] 夸克网盘 Provider
