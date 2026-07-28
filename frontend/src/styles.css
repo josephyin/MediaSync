@@ -32,8 +32,8 @@ h1, h2, h3, p { margin-top: 0; }
   border-right: 1px solid rgba(255,255,255,.06);
 }
 .brand { display: flex; gap: 12px; align-items: center; padding: 25px 10px 23px; }
-.brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, #818cf8, #6366f1 50%, #a855f7); box-shadow: 0 8px 22px rgba(99,102,241,.32); }
-.brand-mark span { color: #fff; font-size: 18px; font-weight: 800; }
+.brand-mark { display: block; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 13px; box-shadow: 0 8px 22px rgba(79,70,229,.32); }
+.brand-mark img { display: block; width: 100%; height: 100%; border-radius: inherit; }
 .brand-copy strong { display: block; font-size: 18px; letter-spacing: -.02em; }
 .brand-copy small { display: block; margin-top: 3px; color: #98a2b3; font-size: 11px; }
 .nav-caption { padding: 10px 12px 8px; color: #667085; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
