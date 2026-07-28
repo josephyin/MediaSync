@@ -2,6 +2,32 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.6] - 2026-07-28
+
+这是 v0.2 可靠性基础的第六个候选版本，重点修复低性能 NAS 上 Docker 健康
+检查容易超时的问题，并加入正式 MediaSync 品牌图标和群晖安装说明。
+
+### 新增
+
+- 新增播放与同步语义结合的 MediaSync SVG 品牌图标。
+- 浏览器 favicon、登录页和管理后台侧边栏统一使用正式图标。
+- 新增群晖 DSM Container Manager 中文安装教程。
+- 明确群晖不会自动创建宿主机 `/data` 文件夹映射，创建容器时必须手工添加。
+
+### 修复
+
+- Docker 健康检查超时从 5 秒调整为 15 秒。
+- 启动宽限从 30 秒调整为 60 秒，适应启动较慢的 NAS。
+- 健康检查改为通过 Nginx 代理检查 API，一次请求同时覆盖 Web 入口与 API，
+  避免重复串行探测导致假超时。
+- 保留 Launcher、Nginx、API、Scheduler 和 Worker 五组件健康语义。
+
+### 兼容性
+
+- 本版本不包含数据库、迁移、Task Engine 或 Provider 行为变化。
+- 端口、`/data`、默认管理员密码和已有密码升级保护契约不变。
+- 从 rc.5 升级时复用原有 `/data`，无需额外迁移步骤。
+
 ## [0.2.0-rc.5] - 2026-07-28
 
 这是 v0.2 可靠性基础的第五个候选版本，保留 rc.4 的飞牛友好镜像默认值，并
@@ -145,6 +171,7 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.6]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.6
 [0.2.0-rc.5]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.5
 [0.2.0-rc.4]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.4
 [0.2.0-rc.3]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.3
