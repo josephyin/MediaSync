@@ -75,6 +75,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=mediasync
 
       - name: 更新 Docker Hub 中文说明
+        id: dockerhub-description
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -83,6 +85,11 @@ jobs:
           short-description: 自托管的家庭影音云盘订阅同步服务
           readme-filepath: ./docs/dockerhub-overview.md
           enable-url-completion: true
+
+      - name: 提示 Docker Hub 说明同步结果
+        if: steps.dockerhub-description.outcome == 'failure'
+        run: |
+          echo "::warning::Docker Hub Overview 自动更新失败；镜像已经发布，请检查 Access Token 的仓库详情管理权限并手动同步说明。"
 
   mirror-existing:
     name: 同步 MediaSync 单镜像
