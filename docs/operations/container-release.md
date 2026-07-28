@@ -5,8 +5,9 @@ Container Registry（GHCR）和 Docker Hub。
 
 ## 镜像
 
-从 v0.2.0-rc.2 开始，每个版本只使用一个 `mediasync` 镜像。迁移、对账、API、
-Scheduler、Worker 和 frontend 容器通过不同命令复用它。
+从 v0.2.0-rc.2 开始，每个版本只使用一个 `mediasync` 镜像。v0.2.0-rc.3
+开始，镜像默认使用单容器 Appliance 入口；迁移、对账、API、Scheduler、Worker
+和 Nginx 的显式命令继续用于高级多容器部署。
 
 v0.2.0-rc.1 是双镜像历史版本：
 
@@ -39,7 +40,7 @@ Access Token 只能保存在 GitHub Secrets 中，不得写入仓库、Issue、P
 页面手动运行 `发布容器镜像`，填写已有标签，例如：
 
 ```text
-v0.2.0-rc.2
+v0.2.0-rc.3
 ```
 
 手动同步不会重新构建镜像。工作流会复制 GHCR 中的多架构 OCI 索引到 Docker
@@ -50,7 +51,7 @@ Hub，避免改变既有版本的代码或依赖。
 同步完成后，在未登录 Docker Hub 的环境检查两个多架构清单：
 
 ```bash
-docker manifest inspect <用户名>/mediasync:v0.2.0-rc.2
+docker manifest inspect <用户名>/mediasync:v0.2.0-rc.3
 ```
 
 清单必须同时包含：
