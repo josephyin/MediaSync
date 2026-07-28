@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 要从 GHCR 同步到 Docker Hub 的既有版本标签
+        description: 要从 GHCR 同步到 Docker Hub 的既有单镜像版本标签
         required: true
         type: string
 
@@ -17,21 +17,9 @@ permissions:
 
 jobs:
   build-and-push:
-    name: 构建 ${{ matrix.name }}
+    name: 构建 MediaSync 单镜像
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: 后端镜像
-            image: mediasync-backend
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
-          - name: 前端镜像
-            image: mediasync-frontend
-            context: .
-            dockerfile: ./frontend/Dockerfile
 
     steps:
       - name: 检出代码
@@ -62,40 +50,32 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
+            ghcr.io/${{ github.repository_owner }}/mediasync
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/mediasync
           tags: |
             type=ref,event=tag
             type=raw,value=rc,enable=${{ contains(github.ref_name, '-rc.') }}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-rc.') }}
           labels: |
-            org.opencontainers.image.title=MediaSync ${{ matrix.name }}
+            org.opencontainers.image.title=MediaSync
             org.opencontainers.image.description=MediaSync 自托管云盘影音同步服务
 
       - name: 构建并推送镜像
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: .
+          file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          cache-from: type=gha,scope=mediasync
+          cache-to: type=gha,mode=max,scope=mediasync
 
   mirror-existing:
-    name: 同步 ${{ matrix.name }}
+    name: 同步 MediaSync 单镜像
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: 后端镜像
-            image: mediasync-backend
-          - name: 前端镜像
-            image: mediasync-frontend
 
     steps:
       - name: 校验版本标签
@@ -127,20 +107,19 @@ jobs:
       - name: 同步版本镜像
         env:
           VERSION: ${{ inputs.version }}
-          IMAGE: ${{ matrix.image }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          source_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGE}:${VERSION}"
-          target_image="docker.io/${DOCKERHUB_USERNAME}/${IMAGE}:${VERSION}"
+          source_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/mediasync:${VERSION}"
+          target_image="docker.io/${DOCKERHUB_USERNAME}/mediasync:${VERSION}"
           docker buildx imagetools create --tag "$target_image" "$source_image"
 
           if [[ "$VERSION" == *"-rc."* ]]; then
             docker buildx imagetools create \
-              --tag "docker.io/${DOCKERHUB_USERNAME}/${IMAGE}:rc" \
+              --tag "docker.io/${DOCKERHUB_USERNAME}/mediasync:rc" \
               "$source_image"
           else
             docker buildx imagetools create \
-              --tag "docker.io/${DOCKERHUB_USERNAME}/${IMAGE}:latest" \
+              --tag "docker.io/${DOCKERHUB_USERNAME}/mediasync:latest" \
               "$source_image"
           fi
 
