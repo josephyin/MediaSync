@@ -2,6 +2,45 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.3] - 2026-07-28
+
+这是 v0.2 可靠性基础的第三个候选版本，重点把单镜像进一步变为普通 NAS 用户
+可直接运行的单容器 Appliance。
+
+### 新增
+
+- 默认镜像入口自动完成持久化配置、数据库迁移、旧任务对账和常驻进程启动。
+- 内置 Launcher 独立监管 Nginx、API、Scheduler 和 Worker。
+- 首次启动自动生成并持久化签名密钥、凭证加密密钥和管理员密码。
+- Unix Socket 本地状态接口和五组件 Docker 聚合健康检查。
+- Docker 单容器、飞牛 fnOS、备份、升级和回滚中文文档。
+- Tag 发布后自动同步 Docker Hub 中文 Overview。
+
+### 改进
+
+- 普通用户只需映射一个 Web 端口和一个 `/data` 目录即可部署。
+- API、Scheduler 和 Worker 在单容器内仍保持独立操作系统进程和职责边界。
+- 迁移或对账失败时 Worker 不会启动，关键进程崩溃时容器整体快速失败。
+- `SIGTERM` 按 Nginx、Scheduler、Worker、API 顺序优雅停止。
+- 自动生成的管理员密码只在首次启动时输出一次。
+- `SESSION_COOKIE_SECURE` 与运行环境名称解耦，局域网 HTTP 默认可以正常登录。
+- Appliance 和高级多容器 Compose 继续复用同一镜像和业务实现。
+
+### 兼容性
+
+- 本版本不包含数据库模型或迁移变化。
+- 从 rc.2 Compose 升级时，第一次启动必须提供原有签名密钥、凭证加密密钥和
+  管理员密码；Appliance 会把它们持久化到 `/data/config/runtime-secrets.json`。
+- 数据库与运行时密钥必须作为一个整体备份和恢复。
+- 新旧部署不得同时访问同一个 SQLite 数据库。
+
+### 已知限制
+
+- 本版本仍需在真实飞牛 fnOS 图形界面完成远端镜像安装验证。
+- Docker 默认停止宽限只有 10 秒；推荐设置 120 秒停止超时。
+- 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
+- SQLite 部署仍只支持一个 Scheduler 和一个 Worker，Worker 并发度固定为 1。
+
 ## [0.2.0-rc.2] - 2026-07-28
 
 这是 v0.2 可靠性基础的第二个候选版本，重点统一容器镜像，同时继续保持 API、Scheduler、Worker 等进程的职责边界。
@@ -59,5 +98,6 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.3]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.3
 [0.2.0-rc.2]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.2
 [0.2.0-rc.1]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.1
