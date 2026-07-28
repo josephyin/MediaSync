@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = Field(default="admin", min_length=5)
     session_max_age_seconds: int = 86400
+    session_cookie_secure: bool = False
     background_execution_mode: Literal["legacy", "process"] = "legacy"
     scheduler_enabled: bool = True
     scheduler_poll_seconds: float = Field(default=10, gt=0, le=300)

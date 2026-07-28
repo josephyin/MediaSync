@@ -29,7 +29,7 @@ def create_session(response: Response, username: str, settings: Settings) -> Non
         value,
         max_age=settings.session_max_age_seconds,
         httponly=True,
-        secure=settings.environment == "production",
+        secure=settings.session_cookie_secure,
         samesite="lax",
         path="/",
     )

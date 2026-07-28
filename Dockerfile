@@ -35,7 +35,11 @@ COPY backend/alembic.ini ./
 COPY backend/migrations ./migrations
 COPY --from=frontend-builder /build/dist /usr/share/nginx/html
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/nginx-appliance.conf /etc/nginx/nginx-appliance.conf
 
 EXPOSE 80 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "-m", "app.appliance.healthcheck"]
+
+CMD ["python", "-m", "app.appliance"]
