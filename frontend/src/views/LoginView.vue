@@ -29,7 +29,7 @@ async function submit() {
 <template>
   <div class="login-page">
     <section class="login-visual">
-      <div class="brand"><span class="brand-mark"><span>M</span></span><div class="brand-copy"><strong>MediaSync</strong><small>SELF-HOSTED MEDIA AUTOMATION</small></div></div>
+      <div class="brand"><span class="brand-mark"><img src="/mediasync-logo.svg" alt="" /></span><div class="brand-copy"><strong>MediaSync</strong><small>SELF-HOSTED MEDIA AUTOMATION</small></div></div>
       <div>
         <span class="eyebrow">YOUR MEDIA, ALWAYS IN SYNC</span>
         <h1>让家庭影音资源<br>自动抵达媒体库</h1>

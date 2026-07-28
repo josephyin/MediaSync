@@ -31,7 +31,7 @@ function navigate(path: string) {
     <button class="sidebar-overlay" aria-label="关闭导航" @click="sidebarOpen = false" />
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark"><span>M</span></span>
+        <span class="brand-mark"><img src="/mediasync-logo.svg" alt="" /></span>
         <div class="brand-copy"><strong>MediaSync</strong><small>影音云盘同步中心</small></div>
       </div>
       <div class="nav-caption">工作台</div>
