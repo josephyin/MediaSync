@@ -23,11 +23,32 @@
 
 ## 发布后验证
 
-Tag 发布后继续确认：
+发布工作流已成功完成：
 
-- Docker Hub 与 GHCR 的 `v0.2.0-rc.5`、`rc` 多架构摘要一致；
-- 未登录状态可以读取精确标签；
-- 远程镜像包含 `8080/tcp`、`/data`、`ADMIN_PASSWORD=admin` 和
-  `IMAGE_DEFAULT_ADMIN_ONLY=true`；
-- Docker Hub 中文 Overview 已更新；
-- rc.4 GitHub Release 已标记升级风险。
+- GitHub Actions：
+  <https://github.com/josephyin/MediaSync/actions/runs/30332061720>；
+- Docker Hub 与 GHCR 的 `v0.2.0-rc.5`、`rc` 标签均指向摘要
+  `sha256:7ebe99b63d01ffdb9dd44df0de3dc17cac1783692546dec176abc7dfc1d59e62`；
+- 两个镜像仓库均包含 `linux/amd64` 和 `linux/arm64`；
+- 使用未登录 Docker 客户端读取两个仓库的精确标签成功；
+- 从 Docker Hub 拉取的远程镜像仅暴露 `8080/tcp`，声明 `/data` 数据卷，
+  并包含 `ADMIN_PASSWORD=admin` 和 `IMAGE_DEFAULT_ADMIN_ONLY=true`；
+- Docker Hub 中文 Overview 已更新为 rc.5；
+- rc.4 GitHub Release 已标记升级风险，并引导用户升级 rc.5。
+
+## 远程镜像升级演练
+
+使用 Docker Hub 发布镜像 `josephyjq/mediasync:v0.2.0-rc.5` 完成以下演练：
+
+1. 使用全新数据卷和自定义管理员密码启动，容器健康；
+2. 自定义密码登录返回 HTTP 200，默认密码登录返回 HTTP 401；
+3. 保留同一数据卷，移除显式 `ADMIN_PASSWORD` 后重新创建容器；
+4. 原自定义密码登录仍返回 HTTP 200，默认密码登录仍返回 HTTP 401；
+5. 演练结束后已删除临时容器和数据卷。
+
+验证结果表明：镜像默认密码只用于全新数据目录，不会在升级时覆盖已有密码。
+
+## 待完成验收
+
+- 在真实飞牛 fnOS 镜像创建表单中确认默认显示一个 `8080:8080` 端口映射、
+  容器路径 `/data`（本地路径待用户选择）以及 `ADMIN_PASSWORD=admin`。
