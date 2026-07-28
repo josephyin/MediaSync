@@ -74,6 +74,7 @@ SESSION_COOKIE_SECURE=true
 - GitHub：https://github.com/josephyin/MediaSync
 - Docker 部署：https://github.com/josephyin/MediaSync/blob/main/docs/deployment/docker-run.md
 - 飞牛 fnOS：https://github.com/josephyin/MediaSync/blob/main/docs/deployment/fnos.md
+- 群晖 DSM：https://github.com/josephyin/MediaSync/blob/main/docs/deployment/synology.md
 - 问题反馈：https://github.com/josephyin/MediaSync/issues
 
 许可证：MIT

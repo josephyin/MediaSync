@@ -200,6 +200,10 @@ def test_single_image_keeps_appliance_and_explicit_nginx_contracts() -> None:
 
     assert 'CMD ["python", "-m", "app.appliance"]' in dockerfile
     assert 'CMD ["python", "-m", "app.appliance.healthcheck"]' in dockerfile
+    assert (
+        "HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3"
+        in dockerfile
+    )
     assert "alembic upgrade head && uvicorn" not in dockerfile
     assert "supervisord" not in dockerfile.lower()
     assert "COPY --from=frontend-builder /build/dist /usr/share/nginx/html" in dockerfile
