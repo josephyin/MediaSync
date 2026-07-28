@@ -44,26 +44,22 @@ mkdir -p /你的路径/mediasync
 
 docker run -d \
   --name mediasync \
-  -p 8080:80 \
+  -p 8080:8080 \
   -v /你的路径/mediasync:/data \
   --restart unless-stopped \
   --stop-timeout 120 \
   josephyjq/mediasync:v0.2.0-rc.3
 ```
 
-访问 `http://NAS_IP:8080`，管理员用户名为 `admin`。首次自动生成的密码只会在
-第一次启动日志中显示一次：
-
-```bash
-docker logs mediasync 2>&1 | grep appliance_initial_admin_password
-```
+访问 `http://NAS_IP:8080`，默认管理员用户名和密码均为 `admin`。首次登录后
+应立即使用自己的强密码重建容器；不要把使用默认密码的管理端口暴露到公网。
 
 也可以在首次启动时直接指定密码：
 
 ```bash
 docker run -d \
   --name mediasync \
-  -p 8080:80 \
+  -p 8080:8080 \
   -v /你的路径/mediasync:/data \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \

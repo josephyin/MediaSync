@@ -22,19 +22,15 @@ mkdir -p /你的路径/mediasync
 
 docker run -d \
   --name mediasync \
-  -p 8080:80 \
+  -p 8080:8080 \
   -v /你的路径/mediasync:/data \
   --restart unless-stopped \
   --stop-timeout 120 \
   josephyjq/mediasync:v0.2.0-rc.3
 ```
 
-打开 `http://NAS_IP:8080`，用户名为 `admin`。首次自动生成的密码只在第一次
-启动日志中出现：
-
-```bash
-docker logs mediasync 2>&1 | grep appliance_initial_admin_password
-```
+打开 `http://NAS_IP:8080`，默认用户名和密码均为 `admin`。首次登录后必须改为
+自己的强密码。
 
 也可以首次启动时设置：
 
@@ -46,7 +42,7 @@ ADMIN_PASSWORD=你的强密码
 
 | 类型 | 配置 |
 |---|---|
-| 端口 | 宿主机 `8080` → 容器 `80` |
+| 端口 | 宿主机 `8080` → 容器 `8080` |
 | 存储 | 宿主机数据目录 → 容器 `/data`，读写 |
 | 重启策略 | `unless-stopped` |
 
@@ -59,8 +55,8 @@ ADMIN_PASSWORD=你的强密码
 
 ## HTTP 与 HTTPS
 
-默认 `SESSION_COOKIE_SECURE=false`，适用于受信任的局域网 HTTP。不要把管理
-端口直接暴露到公网。
+默认密码为 `admin`，`SESSION_COOKIE_SECURE=false`，仅适用于受信任的局域网
+首次安装。请立即修改密码，不要把管理端口直接暴露到公网。
 
 通过 HTTPS 反向代理访问时设置：
 
