@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 要从 GHCR 同步到 Docker Hub 的既有版本标签
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,6 +18,7 @@ permissions:
 jobs:
   build-and-push:
     name: 构建 ${{ matrix.name }}
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -43,11 +50,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: 生成镜像标签
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          images: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
           tags: |
             type=ref,event=tag
             type=raw,value=rc,enable=${{ contains(github.ref_name, '-rc.') }}
@@ -67,3 +83,65 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  mirror-existing:
+    name: 同步 ${{ matrix.name }}
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 后端镜像
+            image: mediasync-backend
+          - name: 前端镜像
+            image: mediasync-frontend
+
+    steps:
+      - name: 校验版本标签
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "无效版本标签：$VERSION"
+            exit 1
+          fi
+
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 同步版本镜像
+        env:
+          VERSION: ${{ inputs.version }}
+          IMAGE: ${{ matrix.image }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          source_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGE}:${VERSION}"
+          target_image="docker.io/${DOCKERHUB_USERNAME}/${IMAGE}:${VERSION}"
+          docker buildx imagetools create --tag "$target_image" "$source_image"
+
+          if [[ "$VERSION" == *"-rc."* ]]; then
+            docker buildx imagetools create \
+              --tag "docker.io/${DOCKERHUB_USERNAME}/${IMAGE}:rc" \
+              "$source_image"
+          else
+            docker buildx imagetools create \
+              --tag "docker.io/${DOCKERHUB_USERNAME}/${IMAGE}:latest" \
+              "$source_image"
+          fi
+
+          docker buildx imagetools inspect "$target_image"
