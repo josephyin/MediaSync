@@ -83,6 +83,10 @@ def test_health_server_refuses_to_replace_regular_file() -> None:
 
 
 def test_collect_health_status_checks_api_through_nginx_once() -> None:
+    assert DEFAULT_NGINX_HEALTH_URL == (
+        "http://127.0.0.1:9090/api/v1/system/health"
+    )
+
     socket_path = short_socket_path()
     server = ApplianceHealthServer(
         socket_path=socket_path,

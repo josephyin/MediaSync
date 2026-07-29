@@ -41,7 +41,7 @@ COPY deploy/nginx-appliance.conf /etc/nginx/nginx-appliance.conf
 
 VOLUME ["/data"]
 
-EXPOSE 8080
+EXPOSE 9090
 
 HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
     CMD ["python", "-m", "app.appliance.healthcheck"]

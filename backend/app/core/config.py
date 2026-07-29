@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "MediaSync"
-    app_version: str = "0.2.0-rc.6"
+    app_version: str = "0.2.0-rc.7"
     environment: str = "development"
     api_prefix: str = "/api/v1"
     database_url: str = "sqlite:///./data/mediasync.db"
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     worker_recovery_batch_size: int = Field(default=100, ge=1, le=1000)
     worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
     worker_retry_max_seconds: int = Field(default=900, ge=1, le=86400)
-    cors_origins: str = "http://localhost:5173,http://localhost:8080"
+    cors_origins: str = "http://localhost:5173,http://localhost:9090"
     log_level: str = "INFO"
     aliyundrive_mode: str = "private_api"
     aliyundrive_api_base_url: str = "https://openapi.alipan.com"

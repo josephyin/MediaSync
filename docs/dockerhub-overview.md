@@ -22,14 +22,14 @@ mkdir -p /你的路径/mediasync
 
 docker run -d \
   --name mediasync \
-  -p 8080:8080 \
+  -p 9090:9090 \
   -v /你的路径/mediasync:/data \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.6
+  josephyjq/mediasync:v0.2.0-rc.7
 ```
 
-打开 `http://NAS_IP:8080`，默认用户名和密码均为 `admin`。首次登录后必须改为
+打开 `http://NAS_IP:9090`，默认用户名和密码均为 `admin`。首次登录后必须改为
 自己的强密码。
 
 也可以首次启动时设置：
@@ -42,7 +42,7 @@ ADMIN_PASSWORD=你的强密码
 
 | 类型 | 配置 |
 |---|---|
-| 端口 | 宿主机 `8080` → 容器 `8080` |
+| 端口 | 宿主机 `9090` → 容器 `9090` |
 | 存储 | 宿主机数据目录 → 容器 `/data`，读写 |
 | 重启策略 | `unless-stopped` |
 
