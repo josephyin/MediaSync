@@ -187,7 +187,7 @@ def test_frontend_uses_configurable_host_port(
         {
             "mode": "ingress",
             "target": 80,
-            "published": "8080",
+            "published": "9090",
             "protocol": "tcp",
         }
     ]
@@ -209,11 +209,11 @@ def test_single_image_keeps_appliance_and_explicit_nginx_contracts() -> None:
     assert "COPY --from=frontend-builder /build/dist /usr/share/nginx/html" in dockerfile
     assert "apt-get install --no-install-recommends --yes nginx" in dockerfile
     assert "VOLUME [\"/data\"]" in dockerfile
-    assert "EXPOSE 8080" in dockerfile
+    assert "EXPOSE 9090" in dockerfile
     assert "EXPOSE 80 8000" not in dockerfile
     assert "ADMIN_PASSWORD=admin" in dockerfile
     assert "IMAGE_DEFAULT_ADMIN_ONLY=true" in dockerfile
     assert "proxy_pass http://mediasync-api:8000;" in nginx
     assert "proxy_pass http://backend:8000;" not in nginx
     assert "proxy_pass http://127.0.0.1:8000;" in appliance_nginx
-    assert "listen 8080;" in appliance_nginx
+    assert "listen 9090;" in appliance_nginx

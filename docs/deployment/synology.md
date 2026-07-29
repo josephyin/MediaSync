@@ -22,7 +22,7 @@
 josephyjq/mediasync
 ```
 
-下载精确版本标签 `v0.2.0-rc.6`，不要使用来源不明的第三方镜像。
+下载精确版本标签 `v0.2.0-rc.7`，不要使用来源不明的第三方镜像。
 
 ## 3. 创建容器
 
@@ -39,7 +39,7 @@ josephyjq/mediasync
 
 | 本地端口 | 容器端口 | 类型 |
 |---:|---:|---|
-| `8080` | `8080` | TCP |
+| `9090` | `9090` | TCP |
 
 ## 4. 必须添加存储映射
 
@@ -78,7 +78,7 @@ josephyjq/mediasync
 启动后访问：
 
 ```text
-http://群晖_IP:8080
+http://群晖_IP:9090
 ```
 
 健康检查会验证 Launcher、Nginx、API、Scheduler 和 Worker。NAS 启动较慢时

@@ -2,6 +2,26 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.7] - 2026-07-29
+
+这是 v0.2 可靠性基础的第七个候选版本，统一调整普通用户和 NAS 图形化安装时
+显示的默认 Web 端口。
+
+### 改进
+
+- Appliance 的 Nginx 监听端口从 `8080` 调整为 `9090`。
+- 单镜像只声明一个 `9090/tcp`，飞牛和群晖创建容器时使用
+  `9090:9090`。
+- Docker Compose 默认宿主机端口调整为 `9090`。
+- 健康检查、CORS 默认来源、Docker Hub Overview 和当前部署文档同步使用
+  `9090`。
+
+### 兼容性
+
+- 从 rc.6 升级时需要把端口映射从 `8080:8080` 改为 `9090:9090`。
+- 本版本不包含数据库、迁移、Task Engine、Provider 或持久化数据变化。
+- 原有 `/data` 可以直接复用；升级前仍应完整备份。
+
 ## [0.2.0-rc.6] - 2026-07-28
 
 这是 v0.2 可靠性基础的第六个候选版本，重点修复低性能 NAS 上 Docker 健康
@@ -171,6 +191,7 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.7]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.7
 [0.2.0-rc.6]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.6
 [0.2.0-rc.5]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.5
 [0.2.0-rc.4]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.4

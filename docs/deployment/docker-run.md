@@ -10,7 +10,7 @@ Compose 文件。
 
 ```text
 MediaSync Launcher
-├── Nginx（容器端口 8080）
+├── Nginx（容器端口 9090）
 ├── API
 ├── Scheduler
 └── Worker
@@ -39,21 +39,21 @@ mkdir -p /volume1/docker/mediasync
 拉取并启动精确版本：
 
 ```bash
-docker pull josephyjq/mediasync:v0.2.0-rc.6
+docker pull josephyjq/mediasync:v0.2.0-rc.7
 
 docker run -d \
   --name mediasync \
-  -p 8080:8080 \
+  -p 9090:9090 \
   -v /volume1/docker/mediasync:/data \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.6
+  josephyjq/mediasync:v0.2.0-rc.7
 ```
 
 打开：
 
 ```text
-http://NAS_IP:8080
+http://NAS_IP:9090
 ```
 
 管理员用户名和密码默认均为 `admin`。该默认值仅用于降低 NAS 图形界面的首次
@@ -64,12 +64,12 @@ http://NAS_IP:8080
 ```bash
 docker run -d \
   --name mediasync \
-  -p 8080:8080 \
+  -p 9090:9090 \
   -v /volume1/docker/mediasync:/data \
   -e ADMIN_PASSWORD='请替换为强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.6
+  josephyjq/mediasync:v0.2.0-rc.7
 ```
 
 显式密码不会写入日志。Shell 历史可能记录命令，介意时请使用环境变量文件或
@@ -176,14 +176,14 @@ docker rm mediasync
 ```bash
 docker run -d \
   --name mediasync \
-  -p 8080:8080 \
+  -p 9090:9090 \
   -v /volume1/docker/mediasync:/data \
   -e SECRET_KEY='rc.2 原值' \
   -e CREDENTIAL_ENCRYPTION_KEY='rc.2 原值' \
   -e ADMIN_PASSWORD='rc.2 原值' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.6
+  josephyjq/mediasync:v0.2.0-rc.7
 ```
 
 密钥持久化成功后，后续重建容器可以不再重复传入两个加密密钥。
@@ -203,7 +203,7 @@ rc.3 没有新增数据库迁移，但回滚前仍必须保留完整备份。
 
 - 默认用户名和密码均为 `admin`，首次登录后必须设置强密码；
 - 默认 `SESSION_COOKIE_SECURE=false` 只适用于受信任的局域网 HTTP；
-- 不要把 `8080` 管理端口直接映射到公网；
+- 不要把 `9090` 管理端口直接映射到公网；
 - 公网访问必须使用 HTTPS 反向代理，并设置
   `SESSION_COOKIE_SECURE=true`；
 - 不需要特权模式、Docker Socket 或额外 Linux capabilities；

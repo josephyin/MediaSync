@@ -15,7 +15,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前候选版本为 `v0.2.0-rc.6`。普通用户可以用一个容器直接运行；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。版本仍处于稳定性观察期，默认 Web 私有接口可能随上游更新失效。
+> 当前候选版本为 `v0.2.0-rc.7`。普通用户可以用一个容器直接运行；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。版本仍处于稳定性观察期，默认 Web 私有接口可能随上游更新失效。
 
 ## MVP 功能
 
@@ -44,14 +44,14 @@ mkdir -p /你的路径/mediasync
 
 docker run -d \
   --name mediasync \
-  -p 8080:8080 \
+  -p 9090:9090 \
   -v /你的路径/mediasync:/data \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.6
+  josephyjq/mediasync:v0.2.0-rc.7
 ```
 
-访问 `http://NAS_IP:8080`，默认管理员用户名和密码均为 `admin`。首次登录后
+访问 `http://NAS_IP:9090`，默认管理员用户名和密码均为 `admin`。首次登录后
 应立即使用自己的强密码重建容器；不要把使用默认密码的管理端口暴露到公网。
 
 也可以在首次启动时直接指定密码：
@@ -59,12 +59,12 @@ docker run -d \
 ```bash
 docker run -d \
   --name mediasync \
-  -p 8080:8080 \
+  -p 9090:9090 \
   -v /你的路径/mediasync:/data \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.6
+  josephyjq/mediasync:v0.2.0-rc.7
 ```
 
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
@@ -91,7 +91,7 @@ SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.6
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.7
 ```
 
 ```bash
@@ -200,6 +200,7 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.1` 可靠性基础预发布版
 - [x] 发布 `v0.2.0-rc.2` 单镜像部署预发布版
 - [x] 发布 `v0.2.0-rc.6` NAS 健康检查与品牌图标预发布版
+- [x] 发布 `v0.2.0-rc.7` 默认端口 `9090` 预发布版
 - [ ] 完成 v0.2 八周稳定性观察
 - [ ] 发布 `v0.2.0` 正式版
 - [ ] 夸克网盘 Provider
