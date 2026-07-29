@@ -39,13 +39,27 @@
 - Logo 静态资源 SHA-256 为
   `146c8fa88a66751a591c759939ac2df2d81d8ee12542e1f1cd622d4aa9a226d9`。
 
-## 发布后验证
+## 发布结果
 
-Tag 发布后继续确认：
+- Git Tag：`v0.2.0-rc.7`；
+- GitHub Release：预发布；
+- 发布提交：`37fcd78539b2c81858d99d11432804a078847026`；
+- GitHub Actions 第 1 次构建成功，用时约 5 分 44 秒；
+- 镜像构建、Docker Hub/GHCR 推送和 Docker Hub 中文 Overview 更新均成功；
+- Docker Hub 与 GHCR 的 `v0.2.0-rc.7`、`rc` 标签摘要一致：
+  `sha256:99fa8cf7667784ccd9ac8cb6e09b599b440e701b5ee36722651be62f942556a0`；
+- 四个标签均包含 `linux/amd64` 和 `linux/arm64`；
+- 在不使用登录凭据的临时 Docker 配置下，Docker Hub 与 GHCR 的精确标签均可读取。
 
-- Docker Hub 与 GHCR 的 `v0.2.0-rc.7`、`rc` 多架构摘要一致；
-- 两个仓库均包含 `linux/amd64` 和 `linux/arm64`；
-- 未登录状态可以读取精确标签；
-- 远程镜像只声明 `9090/tcp` 和 `/data`；
-- 远程容器映射 `9090:9090` 后可以变为健康；
-- Docker Hub 中文 Overview 已更新为 rc.7 和端口 `9090`。
+## 远程镜像验收
+
+- 从 Docker Hub 拉取 `josephyjq/mediasync:v0.2.0-rc.7` 成功，摘要与发布结果一致；
+- 镜像只声明 `9090/tcp` 和 `/data`；
+- 默认环境变量包含 `ADMIN_PASSWORD=admin` 和 `IMAGE_DEFAULT_ADMIN_ONLY=true`；
+- 健康检查元数据为 30 秒周期、15 秒超时、60 秒启动宽限、3 次重试；
+- 使用独立临时数据卷首次启动成功，容器状态为 `healthy`；
+- 宿主机临时端口映射到容器 `9090` 后，Web 健康 API 返回 `{"status":"ok"}`；
+- Launcher、Nginx、API、Scheduler 和 Worker 全部正常；
+- OpenAPI 版本为 `0.2.0-rc.7`；
+- 容器内 Logo SHA-256 为
+  `146c8fa88a66751a591c759939ac2df2d81d8ee12542e1f1cd622d4aa9a226d9`。
