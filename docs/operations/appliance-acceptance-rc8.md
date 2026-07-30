@@ -32,22 +32,29 @@
 
 ## 发布结果
 
-本节在 Tag、GitHub Release 和双 Registry 镜像发布完成后回填：
-
-- Git Tag；
-- GitHub Release 类型与发布提交；
-- GitHub Actions 运行结果；
-- Docker Hub 与 GHCR 精确标签和 `rc` 标签摘要；
-- `linux/amd64` 与 `linux/arm64` 清单；
-- Docker Hub Overview 同步结果。
+- Git Tag：`v0.2.0-rc.8`；
+- GitHub Release：预发布；
+- 发布提交：`7ccc9171b07570151404f5d1a36ac593c979f136`；
+- main 分支持续集成成功；
+- 容器镜像发布工作流成功，用时 5 分 32 秒；
+- 镜像构建、Docker Hub/GHCR 推送和 Docker Hub 中文 Overview 更新均成功；
+- Docker Hub 与 GHCR 的 `v0.2.0-rc.8`、`rc` 标签摘要一致：
+  `sha256:548cd16a09e6817e53218548605089a6b0c8742c86e2fd9129294d49344a5aaa`；
+- 四个标签均包含 `linux/amd64` 和 `linux/arm64`；
+- Docker Hub 精确标签可以在无登录凭据的临时 Docker 配置中拉取；
+- GHCR 精确标签可以在无登录凭据的临时 Docker 配置中读取多架构清单。
 
 ## 远程镜像验收
 
-本节在拉取 Docker Hub 精确标签后回填：
-
-- 匿名拉取和镜像摘要；
-- 单一 `9090/tcp`、`/data` 和健康检查元数据；
-- 全新数据卷启动与聚合健康状态；
-- OpenAPI 版本；
-- 在线修改密码；
-- 容器重启后新密码登录和旧密码拒绝。
+- 从 Docker Hub 匿名拉取 `josephyjq/mediasync:v0.2.0-rc.8` 成功，摘要与发布
+  结果一致；
+- 镜像只声明 `9090/tcp` 和 `/data`；
+- 健康检查元数据为 30 秒周期、15 秒超时、60 秒启动宽限、3 次重试；
+- 使用独立临时数据卷首次启动成功，容器状态为 `healthy`；
+- Web 健康 API 返回 `{"status":"ok"}`；
+- Launcher、Nginx、API、Scheduler 和 Worker 全部正常；
+- OpenAPI 版本为 `0.2.0-rc.8`；
+- 默认 `admin/admin` 登录返回 200，并声明支持在线修改密码；
+- 在线修改密码成功后旧会话变为未认证，旧密码登录返回 401；
+- 容器重启后旧密码仍返回 401，新密码登录返回 200；
+- 验收完成后临时容器、数据卷和匿名 Docker 配置均已删除。
