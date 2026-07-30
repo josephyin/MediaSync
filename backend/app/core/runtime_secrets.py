@@ -34,12 +34,14 @@ class RuntimeSecrets:
     secret_key: str
     credential_encryption_key: str
     admin_password: str
+    admin_session_revision: int = 0
 
     def as_environment(self) -> dict[str, str]:
         return {
             "SECRET_KEY": self.secret_key,
             "CREDENTIAL_ENCRYPTION_KEY": self.credential_encryption_key,
             "ADMIN_PASSWORD": self.admin_password,
+            "ADMIN_SESSION_REVISION": str(self.admin_session_revision),
         }
 
 
@@ -98,7 +100,11 @@ def prepare_runtime_secrets(
             )
 
         _validate_admin_password(requested_password)
-        updated = replace(current, admin_password=requested_password)
+        updated = replace(
+            current,
+            admin_password=requested_password,
+            admin_session_revision=current.admin_session_revision + 1,
+        )
         _write_runtime_secrets(secrets_path, updated)
         return RuntimeSecretsPreparation(
             values=updated,
@@ -198,6 +204,11 @@ def _read_runtime_secrets(path: Path) -> RuntimeSecrets:
         secret_key=_required_string(payload, "secret_key"),
         credential_encryption_key=_required_string(payload, "credential_encryption_key"),
         admin_password=_required_string(payload, "admin_password"),
+        admin_session_revision=_optional_nonnegative_integer(
+            payload,
+            "admin_session_revision",
+            default=0,
+        ),
     )
     _validate_key("SECRET_KEY", values.secret_key)
     _validate_key("CREDENTIAL_ENCRYPTION_KEY", values.credential_encryption_key)
@@ -216,6 +227,7 @@ def _write_runtime_secrets(path: Path, values: RuntimeSecrets) -> None:
         "secret_key": values.secret_key,
         "credential_encryption_key": values.credential_encryption_key,
         "admin_password": values.admin_password,
+        "admin_session_revision": values.admin_session_revision,
     }
     encoded = f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
     temporary_path: Path | None = None
@@ -309,6 +321,49 @@ def _required_string(payload: dict[str, Any], name: str) -> str:
     if not isinstance(value, str) or not value:
         raise RuntimeSecretsError(f"Runtime secrets field is missing or invalid: {name}")
     return value
+
+
+def _optional_nonnegative_integer(
+    payload: dict[str, Any],
+    name: str,
+    *,
+    default: int,
+) -> int:
+    value = payload.get(name, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise RuntimeSecretsError(f"Runtime secrets field is missing or invalid: {name}")
+    return value
+
+
+def update_runtime_admin_password(
+    path: Path,
+    *,
+    current_password: str,
+    new_password: str,
+    expected_revision: int,
+) -> RuntimeSecrets:
+    """Atomically update the persisted Appliance password and session revision."""
+
+    secrets_path = Path(path)
+    if secrets_path.is_symlink():
+        raise RuntimeSecretsError(
+            f"Runtime secrets file must not be a symbolic link: {secrets_path}"
+        )
+    current = _read_runtime_secrets(secrets_path)
+    if current.admin_session_revision != expected_revision or not secrets.compare_digest(
+        current.admin_password,
+        current_password,
+    ):
+        raise RuntimeSecretsError("Administrator credential changed concurrently")
+
+    _validate_admin_password(new_password)
+    updated = replace(
+        current,
+        admin_password=new_password,
+        admin_session_revision=current.admin_session_revision + 1,
+    )
+    _write_runtime_secrets(secrets_path, updated)
+    return updated
 
 
 def _validate_key(name: str, value: str) -> None:

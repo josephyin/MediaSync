@@ -19,7 +19,12 @@ from app.appliance.health import (
     DEFAULT_HEALTH_SOCKET_PATH,
     ApplianceHealthServer,
 )
-from app.core.runtime_secrets import RuntimeSecretsError, prepare_runtime_secrets
+from app.core.runtime_secrets import (
+    RUNTIME_CONFIG_DIRECTORY,
+    RUNTIME_SECRETS_FILENAME,
+    RuntimeSecretsError,
+    prepare_runtime_secrets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +211,8 @@ class ApplianceLauncher:
                 self._base_environment.get("ADMIN_USERNAME", "admin"),
                 preparation.initial_admin_password,
             )
+        if preparation.admin_password_updated:
+            logger.info("admin_password_reset_succeeded source=environment")
 
         environment = dict(self._base_environment)
         environment.update(preparation.values.as_environment())
@@ -214,6 +221,12 @@ class ApplianceLauncher:
                 "DATABASE_URL": DEFAULT_DATABASE_URL,
                 "BACKGROUND_EXECUTION_MODE": "process",
                 "ENVIRONMENT": "production",
+                "ADMIN_PASSWORD_CHANGE_SUPPORTED": "true",
+                "RUNTIME_SECRETS_PATH": str(
+                    self._data_directory
+                    / RUNTIME_CONFIG_DIRECTORY
+                    / RUNTIME_SECRETS_FILENAME
+                ),
             }
         )
         return environment

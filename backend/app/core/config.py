@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     credential_encryption_key: str = Field(default="change-me-in-production", min_length=16)
     admin_username: str = "admin"
     admin_password: str = Field(default="admin", min_length=5)
+    admin_session_revision: int = Field(default=0, ge=0)
+    admin_password_change_supported: bool = False
+    runtime_secrets_path: str = ""
     session_max_age_seconds: int = 86400
     session_cookie_secure: bool = False
     background_execution_mode: Literal["legacy", "process"] = "legacy"

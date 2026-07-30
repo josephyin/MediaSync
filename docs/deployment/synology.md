@@ -73,6 +73,9 @@ josephyjq/mediasync
 建议首次创建时直接把 `ADMIN_PASSWORD` 改为强密码。已有 `/data` 升级时，
 `IMAGE_DEFAULT_ADMIN_ONLY=true` 会阻止镜像默认的 `admin` 覆盖原密码。
 
+启动并登录后，也可以点击管理后台左下角管理员区域的锁形按钮在线修改密码。
+修改成功后所有旧会话立即失效，新密码随 `/data` 持久化。
+
 ## 6. 启动与检查
 
 启动后访问：

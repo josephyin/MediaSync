@@ -39,6 +39,7 @@ def test_first_start_generates_and_persists_runtime_secrets(tmp_path: Path) -> N
         "secret_key": result.values.secret_key,
         "credential_encryption_key": result.values.credential_encryption_key,
         "admin_password": result.values.admin_password,
+        "admin_session_revision": 0,
     }
     assert stat.S_IMODE(secrets_path.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(secrets_path.stat().st_mode) == 0o600
@@ -81,6 +82,7 @@ def test_first_start_persists_explicit_environment_values(tmp_path: Path) -> Non
         "SECRET_KEY": SECRET_KEY,
         "CREDENTIAL_ENCRYPTION_KEY": CREDENTIAL_KEY,
         "ADMIN_PASSWORD": ADMIN_PASSWORD,
+        "ADMIN_SESSION_REVISION": "0",
     }
     assert result.initial_admin_password is None
 
@@ -144,6 +146,7 @@ def test_explicit_admin_password_resets_and_persists_offline(tmp_path: Path) -> 
     assert reset.values.secret_key == first.values.secret_key
     assert reset.values.credential_encryption_key == first.values.credential_encryption_key
     assert reset.values.admin_password == "new-strong-admin-password"
+    assert reset.values.admin_session_revision == 1
     assert reloaded.values == reset.values
 
 
@@ -194,6 +197,29 @@ def test_custom_admin_password_overrides_image_default_for_existing_data(
 
     assert restarted.admin_password_updated is True
     assert restarted.values.admin_password == "new-strong-admin-password"
+    assert restarted.values.admin_session_revision == 1
+
+
+def test_legacy_runtime_secrets_default_session_revision_to_zero(
+    tmp_path: Path,
+) -> None:
+    secrets_path = runtime_secrets_path(tmp_path)
+    secrets_path.parent.mkdir(parents=True)
+    secrets_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "secret_key": SECRET_KEY,
+                "credential_encryption_key": CREDENTIAL_KEY,
+                "admin_password": ADMIN_PASSWORD,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = prepare_runtime_secrets(tmp_path, environment={})
+
+    assert result.values.admin_session_revision == 0
 
 
 @pytest.mark.parametrize("database_suffix", ["", "-wal", "-shm"])

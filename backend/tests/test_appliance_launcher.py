@@ -87,9 +87,34 @@ def test_prepare_environment_persists_required_runtime_values(
     assert environment["SECRET_KEY"] == SECRET_KEY
     assert environment["CREDENTIAL_ENCRYPTION_KEY"] == CREDENTIAL_KEY
     assert environment["ADMIN_PASSWORD"] == ADMIN_PASSWORD
+    assert environment["ADMIN_SESSION_REVISION"] == "0"
+    assert environment["ADMIN_PASSWORD_CHANGE_SUPPORTED"] == "true"
+    assert environment["RUNTIME_SECRETS_PATH"] == str(
+        tmp_path / "config" / "runtime-secrets.json"
+    )
     assert environment["DATABASE_URL"] == DEFAULT_DATABASE_URL
     assert environment["BACKGROUND_EXECUTION_MODE"] == "process"
     assert environment["ENVIRONMENT"] == "production"
+
+
+def test_offline_password_reset_increments_session_revision(
+    tmp_path: Path,
+) -> None:
+    first = ApplianceLauncher(
+        data_directory=tmp_path,
+        environment=appliance_environment(),
+    ).prepare_environment()
+    reset_environment = appliance_environment()
+    reset_environment["ADMIN_PASSWORD"] = "reset-admin-password"
+
+    reset = ApplianceLauncher(
+        data_directory=tmp_path,
+        environment=reset_environment,
+    ).prepare_environment()
+
+    assert first["ADMIN_SESSION_REVISION"] == "0"
+    assert reset["ADMIN_PASSWORD"] == "reset-admin-password"
+    assert reset["ADMIN_SESSION_REVISION"] == "1"
 
 
 def test_generated_admin_password_is_logged_only_on_first_start(
