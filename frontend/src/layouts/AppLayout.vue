@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
-import { authState, logout } from '../stores/auth'
+import { authState, changePassword, logout } from '../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const sidebarOpen = ref(false)
+const passwordDialogOpen = ref(false)
+const passwordSubmitting = ref(false)
+const passwordForm = reactive({
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+})
 const navItems = [
   { path: '/', label: '仪表盘', description: '运行概览', icon: 'dashboard' },
   { path: '/accounts', label: '云盘账号', description: '凭证与授权', icon: 'cloud' },
@@ -18,6 +26,43 @@ const navItems = [
 async function signOut() {
   await logout()
   await router.push('/login')
+}
+
+function resetPasswordForm() {
+  passwordForm.currentPassword = ''
+  passwordForm.newPassword = ''
+  passwordForm.confirmPassword = ''
+}
+
+async function submitPasswordChange() {
+  if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+    ElMessage.warning('请完整填写三个密码字段')
+    return
+  }
+  if (passwordForm.newPassword.length < 8) {
+    ElMessage.warning('新密码至少需要 8 个字符')
+    return
+  }
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+
+  passwordSubmitting.value = true
+  try {
+    await changePassword(
+      passwordForm.currentPassword,
+      passwordForm.newPassword,
+      passwordForm.confirmPassword,
+    )
+    passwordDialogOpen.value = false
+    ElMessage.success('密码已修改，请使用新密码重新登录')
+    await router.push('/login')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '密码修改失败')
+  } finally {
+    passwordSubmitting.value = false
+  }
 }
 
 function navigate(path: string) {
@@ -55,6 +100,9 @@ function navigate(path: string) {
       <div class="sidebar-footer">
         <span class="user-avatar">{{ (authState.username || 'A').slice(0, 1).toUpperCase() }}</span>
         <div class="user-copy"><strong>{{ authState.username }}</strong><small>管理员</small></div>
+        <el-tooltip content="修改管理员密码" placement="top">
+          <button class="icon-button dark" aria-label="修改管理员密码" @click="passwordDialogOpen = true"><AppIcon name="lock" :size="18" /></button>
+        </el-tooltip>
         <el-tooltip content="退出登录" placement="top">
           <button class="icon-button dark" aria-label="退出登录" @click="signOut"><AppIcon name="logout" :size="18" /></button>
         </el-tooltip>
@@ -69,5 +117,64 @@ function navigate(path: string) {
       </header>
       <div class="main-content"><RouterView /></div>
     </main>
+
+    <el-dialog
+      v-model="passwordDialogOpen"
+      title="修改管理员密码"
+      width="min(460px, calc(100vw - 32px))"
+      destroy-on-close
+      @closed="resetPasswordForm"
+    >
+      <el-alert
+        v-if="!authState.passwordChangeSupported"
+        title="当前部署模式不支持在线修改"
+        type="warning"
+        :closable="false"
+        show-icon
+      >
+        高级 Compose 部署请修改 .env 中的 ADMIN_PASSWORD，并重建 API 容器。
+      </el-alert>
+      <el-form v-else label-position="top" @submit.prevent="submitPasswordChange">
+        <el-form-item label="当前密码">
+          <el-input
+            v-model="passwordForm.currentPassword"
+            type="password"
+            autocomplete="current-password"
+            show-password
+          />
+        </el-form-item>
+        <el-form-item label="新密码">
+          <el-input
+            v-model="passwordForm.newPassword"
+            type="password"
+            autocomplete="new-password"
+            maxlength="128"
+            show-password
+          />
+          <div class="form-tip">至少 8 个字符，推荐使用容易记忆的长密码短语。</div>
+        </el-form-item>
+        <el-form-item label="确认新密码">
+          <el-input
+            v-model="passwordForm.confirmPassword"
+            type="password"
+            autocomplete="new-password"
+            maxlength="128"
+            show-password
+            @keyup.enter="submitPasswordChange"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="passwordDialogOpen = false">取消</el-button>
+        <el-button
+          v-if="authState.passwordChangeSupported"
+          type="primary"
+          :loading="passwordSubmitting"
+          @click="submitPasswordChange"
+        >
+          修改并重新登录
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>

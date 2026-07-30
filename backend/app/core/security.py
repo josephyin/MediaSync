@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, Request, Response, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from app.core.admin_credentials import get_admin_credential_store
 from app.core.config import Settings, get_settings
 
 SESSION_COOKIE = "mediasync_session"
@@ -17,13 +18,19 @@ def _serializer(settings: Settings) -> URLSafeTimedSerializer:
 
 
 def authenticate_admin(username: str, password: str, settings: Settings) -> bool:
-    return secrets.compare_digest(username, settings.admin_username) and secrets.compare_digest(
-        password, settings.admin_password
-    )
+    return secrets.compare_digest(
+        username,
+        settings.admin_username,
+    ) and get_admin_credential_store().verify(password)
 
 
 def create_session(response: Response, username: str, settings: Settings) -> None:
-    value = _serializer(settings).dumps({"sub": username})
+    value = _serializer(settings).dumps(
+        {
+            "sub": username,
+            "rev": get_admin_credential_store().revision,
+        }
+    )
     response.set_cookie(
         SESSION_COOKIE,
         value,
@@ -55,6 +62,9 @@ def require_admin(request: Request) -> str:
     username = str(payload.get("sub", ""))
     if not secrets.compare_digest(username, settings.admin_username):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+    revision = payload.get("rev", 0)
+    if revision != get_admin_credential_store().revision:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
     return username
 
 
