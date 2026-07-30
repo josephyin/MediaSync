@@ -1,0 +1,171 @@
+name: 持续集成
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端与迁移
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 配置 Python 3.12 与 uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          working-directory: backend
+          enable-cache: true
+
+      - name: 按锁文件安装后端依赖
+        run: uv sync --frozen --extra dev
+
+      - name: 检查 Python 代码规范
+        run: uv run --frozen ruff check app tests
+
+      - name: 运行后端测试
+        run: uv run --frozen pytest -q
+
+      - name: 验证全新数据库迁移与回滚
+        env:
+          DATABASE_URL: sqlite:///./data/ci-migration.db
+          SECRET_KEY: ci-migration-secret
+          CREDENTIAL_ENCRYPTION_KEY: ci-migration-credential
+          ADMIN_PASSWORD: ci-migration-password
+        run: |
+          mkdir -p data
+          uv run --frozen alembic upgrade head
+          uv run --frozen alembic check
+          uv run --frozen alembic downgrade base
+          uv run --frozen alembic upgrade head
+
+  frontend:
+    name: 前端生产构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 配置 Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 按锁文件安装前端依赖
+        run: npm ci
+
+      - name: 构建前端生产资源
+        run: npm run build
+
+  image:
+    name: 单镜像与部署契约
+    needs:
+      - backend
+      - frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI_IMAGE: mediasync:ci
+      CI_CONTAINER: mediasync-ci
+      CI_VOLUME: mediasync-ci-data
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 验证 Docker Compose 展开配置
+        env:
+          SECRET_KEY: ci-compose-secret
+          CREDENTIAL_ENCRYPTION_KEY: ci-compose-credential
+          ADMIN_PASSWORD: ci-compose-password
+        run: |
+          docker compose config --format json > "${RUNNER_TEMP}/mediasync-compose.json"
+          jq -e '.services.frontend.ports == [{
+            "mode": "ingress",
+            "target": 80,
+            "published": "9090",
+            "protocol": "tcp"
+          }]' "${RUNNER_TEMP}/mediasync-compose.json"
+          jq -e '.services["mediasync-worker"].deploy.replicas == 1' \
+            "${RUNNER_TEMP}/mediasync-compose.json"
+          jq -e '.services["mediasync-scheduler"].deploy.replicas == 1' \
+            "${RUNNER_TEMP}/mediasync-compose.json"
+
+      - name: 构建 MediaSync 单镜像
+        run: docker build --tag "${CI_IMAGE}" .
+
+      - name: 验证镜像元数据
+        run: |
+          test "$(docker image inspect "${CI_IMAGE}" \
+            --format '{{json .Config.ExposedPorts}}')" = '{"9090/tcp":{}}'
+          test "$(docker image inspect "${CI_IMAGE}" \
+            --format '{{json .Config.Volumes}}')" = '{"/data":{}}'
+          docker image inspect "${CI_IMAGE}" \
+            --format '{{json .Config.Healthcheck}}' \
+            | jq -e '.Test == ["CMD", "python", "-m", "app.appliance.healthcheck"]'
+
+      - name: 启动 Appliance 冒烟容器
+        run: |
+          docker volume create "${CI_VOLUME}"
+          docker run -d \
+            --name "${CI_CONTAINER}" \
+            -p 19090:9090 \
+            -v "${CI_VOLUME}:/data" \
+            "${CI_IMAGE}"
+
+      - name: 验证 Appliance 健康与版本
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:19090/api/v1/system/health \
+              > "${RUNNER_TEMP}/mediasync-health.json"; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs "${CI_CONTAINER}"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          jq -e '.status == "ok"' "${RUNNER_TEMP}/mediasync-health.json"
+          docker exec "${CI_CONTAINER}" python -m app.appliance.healthcheck \
+            | jq -e '
+              .launcher == true
+              and .nginx == true
+              and .api == true
+              and .scheduler == true
+              and .worker == true
+            '
+          curl --fail --silent http://127.0.0.1:19090/api/openapi.json \
+            | jq -e '.info.version != null'
+
+      - name: 清理冒烟资源
+        if: always()
+        run: |
+          docker rm -f "${CI_CONTAINER}" || true
+          docker volume rm "${CI_VOLUME}" || true
