@@ -2,19 +2,34 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
-## [未发布]
+## [0.2.0-rc.8] - 2026-07-30
+
+这是 v0.2 可靠性基础的第八个候选版本，重点补齐正式版前的工程质量门禁、
+管理员凭证运维能力和备份恢复证据。
 
 ### 新增
 
 - 默认单容器 Appliance 支持在管理后台在线修改管理员密码。
 - 密码修改或离线重置后，全部旧登录会话立即失效。
 - 管理员密码和会话修订号作为一个持久化单元原子更新。
+- 新增 SQLite 数据库、运行时密钥和凭证密钥整体备份恢复演练记录。
+
+### 工程化
+
+- Pull Request 持续集成统一执行 Ruff、后端全量测试和前端生产构建。
+- 版本发布继续从同一次构建同步 GHCR 与 Docker Hub，并验证双架构清单。
 
 ### 安全
 
 - 在线修改必须校验当前密码，新密码至少 8 个字符且不能继续使用 `admin`。
 - 密码不会写入 API 响应、浏览器持久化存储或应用日志。
 - 高级 Compose 继续通过 `.env` 管理密码，界面会明确提示离线修改方式。
+
+### 兼容性
+
+- 本版本不包含数据库模型、迁移、Task Engine 或 Provider 行为变化。
+- 从 rc.7 升级时可直接复用原有 `/data` 和 `9090:9090` 端口映射。
+- 升级前仍应停止容器并完整备份 `/data`。
 
 ## [0.2.0-rc.7] - 2026-07-29
 
@@ -205,6 +220,7 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.8]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.8
 [0.2.0-rc.7]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.7
 [0.2.0-rc.6]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.6
 [0.2.0-rc.5]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.5
