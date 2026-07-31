@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     worker_retry_max_seconds: int = Field(default=900, ge=1, le=86400)
     cors_origins: str = "http://localhost:5173,http://localhost:9090"
     log_level: str = "INFO"
+    update_check_cache_seconds: int = Field(default=3600, ge=60, le=86400)
+    update_check_failure_retry_seconds: int = Field(default=60, ge=10, le=3600)
+    update_check_timeout_seconds: float = Field(default=10, ge=1, le=30)
     aliyundrive_mode: str = "private_api"
     aliyundrive_api_base_url: str = "https://openapi.alipan.com"
     aliyundrive_client_id: str = ""

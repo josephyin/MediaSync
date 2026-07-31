@@ -8,6 +8,7 @@ const AccountsView = () => import('../views/AccountsView.vue')
 const SubscriptionsView = () => import('../views/SubscriptionsView.vue')
 const FilesView = () => import('../views/FilesView.vue')
 const TasksView = () => import('../views/TasksView.vue')
+const SystemView = () => import('../views/SystemView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -22,6 +23,7 @@ const router = createRouter({
         { path: 'subscriptions', component: SubscriptionsView, meta: { title: '分享订阅' } },
         { path: 'files', component: FilesView, meta: { title: '文件记录' } },
         { path: 'tasks', component: TasksView, meta: { title: '任务中心' } },
+        { path: 'system', component: SystemView, meta: { title: '系统设置' } },
       ],
     },
   ],

@@ -99,3 +99,38 @@ export interface TaskRun {
   error_code: string | null
   error_message: string | null
 }
+
+export interface UpdateRelease {
+  version: string
+  tag_name: string
+  digest: string | null
+  published_at: string
+  release_url: string
+  notes: string
+  prerelease: boolean
+  requires_manual_upgrade: boolean
+}
+
+export interface ManualUpgradeInfo {
+  image: string
+  container_port: number
+  data_path: string
+  message: string
+}
+
+export interface UpdateStatus {
+  current_version: string
+  channel: 'stable' | 'rc'
+  status: 'not_checked' | 'current' | 'update_available' | 'error'
+  check_supported: boolean
+  install_supported: boolean
+  install_unavailable_reason: string | null
+  docker_socket_enabled: boolean
+  latest_release: UpdateRelease | null
+  checked_at: string | null
+  last_success_at: string | null
+  stale: boolean
+  cache_hit: boolean
+  error_message: string | null
+  manual_upgrade: ManualUpgradeInfo
+}

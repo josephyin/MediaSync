@@ -7,6 +7,8 @@ from app.api.deps import AdminUser, DbSession
 from app.core.config import get_settings
 from app.models import CloudFile, FolderCheckpoint, Subscription, Task
 from app.providers import list_provider_types
+from app.schemas.update import UpdateStatusRead
+from app.services.update_check_service import get_update_check_service
 
 router = APIRouter(tags=["system"])
 
@@ -26,6 +28,16 @@ def system_info(_: AdminUser) -> dict[str, object]:
         "scheduler_enabled": settings.scheduler_enabled,
         "providers": list_provider_types(),
     }
+
+
+@router.get("/system/update", response_model=UpdateStatusRead)
+def update_status(_: AdminUser) -> UpdateStatusRead:
+    return get_update_check_service().get_status()
+
+
+@router.post("/system/update/check", response_model=UpdateStatusRead)
+async def check_for_updates(_: AdminUser) -> UpdateStatusRead:
+    return await get_update_check_service().check()
 
 
 @router.get("/dashboard/summary")
