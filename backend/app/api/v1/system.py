@@ -7,9 +7,11 @@ from app.api.deps import AdminUser, DbSession
 from app.core.config import get_settings
 from app.models import CloudFile, FolderCheckpoint, Subscription, Task
 from app.providers import list_provider_types
-from app.schemas.update import UpdateStatusRead
+from app.repositories import UpdateOperationRepository
+from app.schemas.update import UpdateOperationInfo, UpdateStatusRead
 from app.services.docker_capability_service import get_docker_capability_service
 from app.services.update_check_service import get_update_check_service
+from app.services.update_execution_gate import build_update_execution_gate
 
 router = APIRouter(tags=["system"])
 
@@ -32,19 +34,24 @@ def system_info(_: AdminUser) -> dict[str, object]:
 
 
 @router.get("/system/update", response_model=UpdateStatusRead)
-async def update_status(_: AdminUser) -> UpdateStatusRead:
+async def update_status(db: DbSession, _: AdminUser) -> UpdateStatusRead:
     status = get_update_check_service().get_status()
-    return await _with_docker_capability(status)
+    return await _with_runtime_status(status, db)
 
 
 @router.post("/system/update/check", response_model=UpdateStatusRead)
-async def check_for_updates(_: AdminUser) -> UpdateStatusRead:
+async def check_for_updates(db: DbSession, _: AdminUser) -> UpdateStatusRead:
     status = await get_update_check_service().check()
-    return await _with_docker_capability(status)
+    return await _with_runtime_status(status, db)
 
 
-async def _with_docker_capability(status: UpdateStatusRead) -> UpdateStatusRead:
+async def _with_runtime_status(
+    status: UpdateStatusRead,
+    db: DbSession,
+) -> UpdateStatusRead:
     capability = await get_docker_capability_service().probe()
+    gate = build_update_execution_gate().evaluate(db)
+    operation = UpdateOperationRepository(db).get_active()
     if capability.reason_code == "ready":
         reason = "Docker 环境验证通过；一键安装将在后续实现阶段启用"
     else:
@@ -55,6 +62,12 @@ async def _with_docker_capability(status: UpdateStatusRead) -> UpdateStatusRead:
             "docker_capability": capability,
             "install_supported": False,
             "install_unavailable_reason": reason,
+            "runtime_mode": gate.mode,
+            "operation": (
+                UpdateOperationInfo.model_validate(operation, from_attributes=True)
+                if operation is not None
+                else None
+            ),
         }
     )
 

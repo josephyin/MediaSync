@@ -4,6 +4,7 @@ from app.models.file import CloudFile
 from app.models.folder_checkpoint import FolderCheckpoint
 from app.models.subscription import Subscription
 from app.models.task import Task, TaskRun
+from app.models.update_operation import UpdateOperation
 
 __all__ = [
     "Base",
@@ -13,4 +14,5 @@ __all__ = [
     "Subscription",
     "Task",
     "TaskRun",
+    "UpdateOperation",
 ]

@@ -12,6 +12,11 @@ from app.repositories.tasks import (
     TaskRunNotFoundError,
     TaskStateConflictError,
 )
+from app.repositories.update_operations import (
+    ActiveUpdateOperationConflictError,
+    UpdateOperationRepository,
+    UpdateOperationStateError,
+)
 
 __all__ = [
     "ActiveTaskRunExistsError",
@@ -26,4 +31,7 @@ __all__ = [
     "TaskRepository",
     "TaskRunNotFoundError",
     "TaskStateConflictError",
+    "ActiveUpdateOperationConflictError",
+    "UpdateOperationRepository",
+    "UpdateOperationStateError",
 ]

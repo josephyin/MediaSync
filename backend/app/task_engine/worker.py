@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 from app.models import Task
 from app.models.base import utcnow
 from app.repositories import TaskOwnershipLostError, TaskRepository
+from app.services.update_execution_gate import (
+    UpdateExecutionGate,
+    build_update_execution_gate,
+)
 from app.task_engine.handlers import (
     TaskExecutionContext,
     TaskHandlerRegistry,
@@ -19,7 +23,7 @@ from app.task_engine.handlers import (
     TaskOutcome,
 )
 
-WorkerCycleStatus = Literal["idle", "completed", "ownership_lost"]
+WorkerCycleStatus = Literal["idle", "paused", "completed", "ownership_lost"]
 
 
 class InvalidTaskOutcomeError(RuntimeError):
@@ -85,6 +89,7 @@ class WorkerRuntime:
         recovery_limit: int = 100,
         backoff: ExponentialBackoff | None = None,
         clock: Callable[[], datetime] = utcnow,
+        update_gate: UpdateExecutionGate | None = None,
     ) -> None:
         if not worker_id:
             raise ValueError("worker_id must not be empty")
@@ -104,9 +109,17 @@ class WorkerRuntime:
         self._recovery_limit = recovery_limit
         self._backoff = backoff or ExponentialBackoff()
         self._clock = clock
+        self._update_gate = update_gate or build_update_execution_gate()
 
     async def run_once(self) -> WorkerCycleResult:
-        claimed, recovered_count = await asyncio.to_thread(self._recover_and_claim)
+        claimed, recovered_count, gated = await asyncio.to_thread(
+            self._recover_and_claim
+        )
+        if gated:
+            return WorkerCycleResult(
+                status="paused",
+                recovered_count=recovered_count,
+            )
         if claimed is None:
             return WorkerCycleResult(status="idle", recovered_count=recovered_count)
 
@@ -189,7 +202,7 @@ class WorkerRuntime:
             result = await self.run_once()
             if on_cycle is not None:
                 on_cycle(result)
-            if result.status != "idle":
+            if result.status not in {"idle", "paused"}:
                 continue
             try:
                 await asyncio.wait_for(
@@ -199,7 +212,7 @@ class WorkerRuntime:
             except TimeoutError:
                 pass
 
-    def _recover_and_claim(self) -> tuple[_ClaimedExecution | None, int]:
+    def _recover_and_claim(self) -> tuple[_ClaimedExecution | None, int, bool]:
         now = self._clock()
         with self._session_factory() as session, session.begin():
             repository = TaskRepository(session, clock=self._clock)
@@ -217,13 +230,16 @@ class WorkerRuntime:
                 if recovered is not None:
                     recovered_count += 1
 
+            if self._update_gate.evaluate(session).blocked:
+                return None, recovered_count, True
+
             claim = repository.claim_next(
                 worker_id=self._worker_id,
                 lease_duration=self._lease_duration,
                 claimed_at=now,
             )
             if claim is None:
-                return None, recovered_count
+                return None, recovered_count, False
             return (
                 _ClaimedExecution(
                     invocation=TaskInvocation.from_task(
@@ -233,6 +249,7 @@ class WorkerRuntime:
                     lock_token=claim.lock_token,
                 ),
                 recovered_count,
+                False,
             )
 
     async def _heartbeat_loop(

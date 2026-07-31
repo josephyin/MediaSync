@@ -33,6 +33,15 @@ class DockerCapabilityInfo(BaseModel):
     message: str
 
 
+class UpdateOperationInfo(BaseModel):
+    operation_id: str
+    status: str
+    source_version: str
+    target_version: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
 class UpdateStatusRead(BaseModel):
     current_version: str
     channel: UpdateChannel
@@ -42,6 +51,8 @@ class UpdateStatusRead(BaseModel):
     install_unavailable_reason: str | None
     docker_socket_enabled: bool = False
     docker_capability: DockerCapabilityInfo
+    runtime_mode: str = "normal"
+    operation: UpdateOperationInfo | None = None
     latest_release: ReleaseInfo | None = None
     checked_at: datetime | None = None
     last_success_at: datetime | None = None
