@@ -83,4 +83,19 @@ export interface Task {
   started_at: string | null
   finished_at: string | null
   next_attempt_at: string | null
+  retry_count: number
+  max_retries: number
+  latest_run: TaskRun | null
+}
+
+export interface TaskRun {
+  id: number
+  run_number: number
+  status: string
+  started_at: string
+  finished_at: string | null
+  duration_ms: number | null
+  result_summary: string | null
+  error_code: string | null
+  error_message: string | null
 }

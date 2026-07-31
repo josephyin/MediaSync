@@ -3,6 +3,10 @@ export const statusLabels: Record<string, string> = {
   disabled: '已停用',
   pending: '等待中',
   running: '执行中',
+  retry: '等待重试',
+  waiting_credential: '等待凭证',
+  cancel_requested: '正在取消',
+  cancelled: '已取消',
   scanning: '扫描中',
   success: '成功',
   failed: '失败',
@@ -19,7 +23,7 @@ export function statusLabel(value: string | null | undefined) {
 export function statusType(value: string | null | undefined) {
   if (['active', 'success', 'saved'].includes(value ?? '')) return 'success'
   if (['failed', 'error'].includes(value ?? '')) return 'danger'
-  if (['pending', 'running', 'scanning', 'saving'].includes(value ?? '')) return 'warning'
+  if (['pending', 'running', 'retry', 'waiting_credential', 'cancel_requested', 'scanning', 'saving'].includes(value ?? '')) return 'warning'
   return 'info'
 }
 
