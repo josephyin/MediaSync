@@ -88,6 +88,51 @@ def test_only_one_active_operation_and_terminal_record_cannot_be_reused(
             repository.transition_active(replacement, status="available")
 
 
+def test_verified_target_can_only_be_recorded_once_while_pulling(
+    sessions: sessionmaker[Session],
+) -> None:
+    with sessions() as session, session.begin():
+        repository = UpdateOperationRepository(session)
+        operation = repository.create(
+            source_version="0.2.0-rc.9",
+            status="available",
+        )
+        repository.transition_active(operation, status="pulling")
+
+        repository.set_verified_target(
+            operation,
+            target_version="v0.3.0-rc.1",
+            target_digest=DIGEST,
+        )
+
+        assert operation.target_version == "v0.3.0-rc.1"
+        assert operation.target_digest == DIGEST
+        with pytest.raises(UpdateOperationStateError):
+            repository.set_verified_target(
+                operation,
+                target_version="v0.3.0-rc.1",
+                target_digest=f"sha256:{'b' * 64}",
+            )
+
+
+def test_verified_target_cannot_be_recorded_before_pulling(
+    sessions: sessionmaker[Session],
+) -> None:
+    with sessions() as session, session.begin():
+        repository = UpdateOperationRepository(session)
+        operation = repository.create(
+            source_version="0.2.0-rc.9",
+            status="available",
+        )
+
+        with pytest.raises(UpdateOperationStateError):
+            repository.set_verified_target(
+                operation,
+                target_version="v0.3.0-rc.1",
+                target_digest=DIGEST,
+            )
+
+
 def test_terminal_operation_history_is_database_protected(
     sessions: sessionmaker[Session],
 ) -> None:

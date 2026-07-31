@@ -10,6 +10,7 @@ from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import quote
 
 import httpx
 
@@ -37,21 +38,38 @@ class DockerEngine(Protocol):
 
 
 class DockerEngineClient:
-    def __init__(self, *, socket_path: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        socket_path: str,
+        timeout_seconds: float,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.socket_path = socket_path
         self.timeout_seconds = timeout_seconds
+        self.transport = transport
 
-    async def _get(self, path: str) -> httpx.Response:
-        transport = httpx.AsyncHTTPTransport(uds=self.socket_path)
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> httpx.Response:
+        transport = self.transport or httpx.AsyncHTTPTransport(uds=self.socket_path)
         try:
             async with httpx.AsyncClient(
                 transport=transport,
                 base_url="http://docker",
-                timeout=self.timeout_seconds,
+                timeout=timeout_seconds or self.timeout_seconds,
             ) as client:
-                return await client.get(path)
+                return await client.request(method, path, params=params)
         except httpx.HTTPError as exc:
             raise DockerEngineError("Docker Engine API 不可访问") from exc
+
+    async def _get(self, path: str) -> httpx.Response:
+        return await self._request("GET", path)
 
     async def ping(self) -> None:
         response = await self._get("/_ping")
@@ -83,6 +101,46 @@ class DockerEngineClient:
         if not isinstance(payload, list):
             raise DockerEngineError("Docker Engine 返回无效容器列表")
         return [item for item in payload if isinstance(item, dict)]
+
+    async def inspect_image(self, reference: str) -> dict[str, Any] | None:
+        response = await self._get(f"/images/{quote(reference, safe='')}/json")
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise DockerEngineError("无法读取目标镜像信息")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise DockerEngineError("Docker Engine 返回无效镜像信息") from exc
+        if not isinstance(payload, dict):
+            raise DockerEngineError("Docker Engine 返回无效镜像信息")
+        return payload
+
+    async def pull_image(
+        self,
+        reference: str,
+        *,
+        timeout_seconds: float,
+    ) -> None:
+        response = await self._request(
+            "POST",
+            "/images/create",
+            params={"fromImage": reference},
+            timeout_seconds=timeout_seconds,
+        )
+        if response.status_code != 200:
+            raise DockerEngineError("目标镜像拉取失败")
+        for line in response.text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = httpx.Response(200, content=line).json()
+            except ValueError as exc:
+                raise DockerEngineError("Docker Engine 返回无效拉取结果") from exc
+            if not isinstance(event, dict):
+                raise DockerEngineError("Docker Engine 返回无效拉取结果")
+            if event.get("error") or event.get("errorDetail"):
+                raise DockerEngineError("目标镜像拉取失败")
 
 
 SocketProbe = Callable[[str], str]
