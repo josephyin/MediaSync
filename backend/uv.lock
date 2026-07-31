@@ -381,7 +381,7 @@ wheels = [
 
 [[package]]
 name = "mediasync-backend"
-version = "0.2.0rc8"
+version = "0.2.0rc9"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
