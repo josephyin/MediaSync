@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.models import CloudFile, FolderCheckpoint, Subscription, Task
 from app.providers import list_provider_types
 from app.schemas.update import UpdateStatusRead
+from app.services.docker_capability_service import get_docker_capability_service
 from app.services.update_check_service import get_update_check_service
 
 router = APIRouter(tags=["system"])
@@ -31,13 +32,31 @@ def system_info(_: AdminUser) -> dict[str, object]:
 
 
 @router.get("/system/update", response_model=UpdateStatusRead)
-def update_status(_: AdminUser) -> UpdateStatusRead:
-    return get_update_check_service().get_status()
+async def update_status(_: AdminUser) -> UpdateStatusRead:
+    status = get_update_check_service().get_status()
+    return await _with_docker_capability(status)
 
 
 @router.post("/system/update/check", response_model=UpdateStatusRead)
 async def check_for_updates(_: AdminUser) -> UpdateStatusRead:
-    return await get_update_check_service().check()
+    status = await get_update_check_service().check()
+    return await _with_docker_capability(status)
+
+
+async def _with_docker_capability(status: UpdateStatusRead) -> UpdateStatusRead:
+    capability = await get_docker_capability_service().probe()
+    if capability.reason_code == "ready":
+        reason = "Docker 环境验证通过；一键安装将在后续实现阶段启用"
+    else:
+        reason = f"{capability.message}；请继续通过 NAS 容器管理器手动升级"
+    return status.model_copy(
+        update={
+            "docker_socket_enabled": capability.socket_available,
+            "docker_capability": capability,
+            "install_supported": False,
+            "install_unavailable_reason": reason,
+        }
+    )
 
 
 @router.get("/dashboard/summary")

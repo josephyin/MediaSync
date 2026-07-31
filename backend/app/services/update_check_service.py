@@ -14,6 +14,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.schemas.update import (
+    DockerCapabilityInfo,
     ManualUpgradeInfo,
     ReleaseInfo,
     UpdateChannel,
@@ -160,6 +161,10 @@ class UpdateCheckService:
             status=status,
             install_unavailable_reason=(
                 "当前版本仅提供检查更新；请在 NAS 容器管理器中保留 /data 并更新镜像"
+            ),
+            docker_capability=DockerCapabilityInfo(
+                reason_code="not_probed",
+                message="尚未探测 Docker 更新能力",
             ),
             latest_release=self._latest_release,
             checked_at=self._last_checked_at,

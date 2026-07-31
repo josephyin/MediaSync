@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     update_check_cache_seconds: int = Field(default=3600, ge=60, le=86400)
     update_check_failure_retry_seconds: int = Field(default=60, ge=10, le=3600)
     update_check_timeout_seconds: float = Field(default=10, ge=1, le=30)
+    docker_socket_path: str = "/var/run/docker.sock"
+    docker_container_id: str = ""
+    docker_capability_cache_seconds: int = Field(default=30, ge=5, le=300)
+    docker_api_timeout_seconds: float = Field(default=3, ge=1, le=10)
     aliyundrive_mode: str = "private_api"
     aliyundrive_api_base_url: str = "https://openapi.alipan.com"
     aliyundrive_client_id: str = ""

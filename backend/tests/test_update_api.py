@@ -4,7 +4,12 @@ from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.main import app
-from app.schemas.update import ManualUpgradeInfo, ReleaseInfo, UpdateStatusRead
+from app.schemas.update import (
+    DockerCapabilityInfo,
+    ManualUpgradeInfo,
+    ReleaseInfo,
+    UpdateStatusRead,
+)
 
 
 class FakeUpdateCheckService:
@@ -17,6 +22,10 @@ class FakeUpdateCheckService:
             channel="rc",
             status="not_checked",
             install_unavailable_reason="当前版本仅提供检查更新",
+            docker_capability=DockerCapabilityInfo(
+                reason_code="not_probed",
+                message="尚未探测 Docker 更新能力",
+            ),
             manual_upgrade=ManualUpgradeInfo(
                 image="josephyjq/mediasync:rc",
                 message="请在 NAS 容器管理器中更新",
@@ -31,6 +40,10 @@ class FakeUpdateCheckService:
             channel="rc",
             status="update_available",
             install_unavailable_reason="当前版本仅提供检查更新",
+            docker_capability=DockerCapabilityInfo(
+                reason_code="not_probed",
+                message="尚未探测 Docker 更新能力",
+            ),
             latest_release=ReleaseInfo(
                 version="0.3.0-rc.1",
                 tag_name="v0.3.0-rc.1",
@@ -50,11 +63,27 @@ class FakeUpdateCheckService:
         )
 
 
+class FakeDockerCapabilityService:
+    async def probe(self) -> DockerCapabilityInfo:
+        return DockerCapabilityInfo(
+            socket_available=True,
+            engine_available=True,
+            container_identified=True,
+            reason_code="ready",
+            message="Docker 环境与当前 MediaSync 容器已安全识别",
+        )
+
+
 def test_update_endpoints_require_admin_and_return_service_status(monkeypatch) -> None:
     from app.api.v1 import system
 
     fake = FakeUpdateCheckService()
     monkeypatch.setattr(system, "get_update_check_service", lambda: fake)
+    monkeypatch.setattr(
+        system,
+        "get_docker_capability_service",
+        lambda: FakeDockerCapabilityService(),
+    )
     settings = get_settings()
 
     with TestClient(app) as client:
@@ -76,5 +105,6 @@ def test_update_endpoints_require_admin_and_return_service_status(monkeypatch) -
         assert checked.json()["status"] == "update_available"
         assert checked.json()["latest_release"]["version"] == "0.3.0-rc.1"
         assert checked.json()["install_supported"] is False
+        assert checked.json()["docker_socket_enabled"] is True
+        assert checked.json()["docker_capability"]["reason_code"] == "ready"
         assert fake.check_calls == 1
-

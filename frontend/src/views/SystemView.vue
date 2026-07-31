@@ -192,9 +192,11 @@ onMounted(loadStatus)
           <el-tag type="success" effect="light">可用</el-tag>
         </div>
         <div class="capability-row">
-          <span class="capability-state"><AppIcon name="settings" :size="17" /></span>
-          <div><strong>Docker Socket</strong><p>默认不挂载，MediaSync 当前无法管理宿主机容器。</p></div>
-          <el-tag type="info" effect="light">未启用</el-tag>
+          <span class="capability-state" :class="{ success: update?.docker_capability.reason_code === 'ready' }"><AppIcon name="settings" :size="17" /></span>
+          <div><strong>Docker 环境</strong><p>{{ update?.docker_capability.message ?? '正在探测 Docker 更新能力' }}</p></div>
+          <el-tag :type="update?.docker_capability.reason_code === 'ready' ? 'success' : 'info'" effect="light">
+            {{ update?.docker_capability.reason_code === 'ready' ? '已识别' : '未就绪' }}
+          </el-tag>
         </div>
         <div class="capability-row">
           <span class="capability-state"><AppIcon name="refresh" :size="17" /></span>
