@@ -118,6 +118,14 @@ export interface ManualUpgradeInfo {
   message: string
 }
 
+export interface DockerCapabilityInfo {
+  socket_available: boolean
+  engine_available: boolean
+  container_identified: boolean
+  reason_code: string
+  message: string
+}
+
 export interface UpdateStatus {
   current_version: string
   channel: 'stable' | 'rc'
@@ -126,6 +134,7 @@ export interface UpdateStatus {
   install_supported: boolean
   install_unavailable_reason: string | null
   docker_socket_enabled: boolean
+  docker_capability: DockerCapabilityInfo
   latest_release: UpdateRelease | null
   checked_at: string | null
   last_success_at: string | null

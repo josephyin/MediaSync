@@ -25,6 +25,14 @@ class ManualUpgradeInfo(BaseModel):
     message: str
 
 
+class DockerCapabilityInfo(BaseModel):
+    socket_available: bool = False
+    engine_available: bool = False
+    container_identified: bool = False
+    reason_code: str
+    message: str
+
+
 class UpdateStatusRead(BaseModel):
     current_version: str
     channel: UpdateChannel
@@ -33,6 +41,7 @@ class UpdateStatusRead(BaseModel):
     install_supported: bool = False
     install_unavailable_reason: str | None
     docker_socket_enabled: bool = False
+    docker_capability: DockerCapabilityInfo
     latest_release: ReleaseInfo | None = None
     checked_at: datetime | None = None
     last_success_at: datetime | None = None
