@@ -52,6 +52,29 @@ function openDetail(task: Task) {
   selectedTask.value = task
   drawer.value = true
 }
+function nextAttemptLabel(task: Task) {
+  if (task.next_attempt_at) return formatDateTime(task.next_attempt_at)
+  if (task.status === 'waiting_credential') return '等待凭证恢复'
+  if (task.status === 'retry') return '等待重新调度'
+  if (task.status === 'pending') return '等待执行'
+  if (task.status === 'running' || task.status === 'cancel_requested') return '执行中'
+  if (task.status === 'failed') return '已停止重试'
+  if (task.status === 'cancelled') return '已取消'
+  return '无需重试'
+}
+function startedAtLabel(task: Task) {
+  if (task.started_at) return formatDateTime(task.started_at)
+  if (task.status === 'pending') return '尚未开始'
+  return '暂无执行记录'
+}
+function finishedAtLabel(task: Task) {
+  if (task.finished_at) return formatDateTime(task.finished_at)
+  if (task.status === 'running' || task.status === 'cancel_requested') return '尚未结束'
+  if (task.status === 'pending') return '尚未开始'
+  if (task.status === 'retry') return '等待下次尝试'
+  if (task.status === 'waiting_credential') return '等待凭证恢复'
+  return '—'
+}
 onMounted(async () => {
   try { subscriptions.value = (await api<Page<Subscription>>('/subscriptions?page_size=100')).items }
   catch { /* 任务列表仍可独立使用 */ }
@@ -103,7 +126,7 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
           </el-table-column>
           <el-table-column label="状态" width="110"><template #default="scope"><el-tag :type="statusType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag></template></el-table-column>
           <el-table-column label="执行信息" min-width="260" show-overflow-tooltip><template #default="scope">{{ taskMessage(scope.row.message) }}</template></el-table-column>
-          <el-table-column label="重试" width="90"><template #default="scope">{{ scope.row.attempt_count }}/{{ scope.row.max_attempts }}</template></el-table-column>
+          <el-table-column label="重试" width="90"><template #default="scope">{{ scope.row.retry_count }}/{{ scope.row.max_retries }}</template></el-table-column>
           <el-table-column label="创建时间" width="160"><template #default="scope"><el-tooltip :content="formatDateTime(scope.row.created_at)"><span>{{ formatRelativeTime(scope.row.created_at) }}</span></el-tooltip></template></el-table-column>
           <el-table-column label="操作" width="85" fixed="right"><template #default="scope"><el-button link type="primary" @click="openDetail(scope.row)">详情</el-button></template></el-table-column>
         </el-table>
@@ -128,11 +151,12 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
         </div>
         <dl>
           <div><dt>触发方式</dt><dd>{{ triggerLabels[selectedTask.trigger_type] ?? selectedTask.trigger_type }}</dd></div>
-          <div><dt>重试次数</dt><dd>{{ selectedTask.attempt_count }} / {{ selectedTask.max_attempts }}</dd></div>
+          <div><dt>执行批次</dt><dd>{{ selectedTask.latest_run ? `第 ${selectedTask.latest_run.run_number} 次` : '尚未执行' }}</dd></div>
+          <div><dt>重试次数</dt><dd>{{ selectedTask.retry_count }} / {{ selectedTask.max_retries }}</dd></div>
           <div><dt>创建时间</dt><dd>{{ formatDateTime(selectedTask.created_at) }}</dd></div>
-          <div><dt>开始时间</dt><dd>{{ formatDateTime(selectedTask.started_at) }}</dd></div>
-          <div><dt>完成时间</dt><dd>{{ formatDateTime(selectedTask.finished_at) }}</dd></div>
-          <div><dt>下次尝试</dt><dd>{{ formatDateTime(selectedTask.next_attempt_at) }}</dd></div>
+          <div><dt>开始时间</dt><dd>{{ startedAtLabel(selectedTask) }}</dd></div>
+          <div><dt>结束时间</dt><dd>{{ finishedAtLabel(selectedTask) }}</dd></div>
+          <div><dt>下次尝试</dt><dd>{{ nextAttemptLabel(selectedTask) }}</dd></div>
           <div v-if="selectedTask.error_code"><dt>错误代码</dt><dd class="error-text">{{ selectedTask.error_code }}</dd></div>
         </dl>
         <div class="message-box"><span>执行信息</span><p>{{ taskMessage(selectedTask.message) }}</p></div>

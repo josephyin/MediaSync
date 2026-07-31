@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.v1 import files as files_api
 from app.api.v1 import subscriptions as subscriptions_api
+from app.api.v1 import tasks as tasks_api
 from app.core.config import Settings
 from app.models import Base, CloudAccount, CloudFile, Subscription, Task, TaskRun
 
@@ -80,6 +81,66 @@ def seed_subscription_and_file(
     session.add(file)
     session.flush()
     return subscription, file
+
+
+def test_task_api_projects_latest_task_run_execution_information(
+    sessions: sessionmaker[Session],
+) -> None:
+    finished_at = NOW.replace(minute=2)
+    with sessions() as session, session.begin():
+        subscription, file = seed_subscription_and_file(session)
+        task = Task(
+            account_id=subscription.cloud_account_id,
+            subscription_id=subscription.id,
+            file_id=file.id,
+            type="transfer",
+            trigger_type="scheduled",
+            status="success",
+            retry_count=1,
+            max_retries=3,
+            completed_at=finished_at,
+        )
+        session.add(task)
+        session.flush()
+        session.add(
+            TaskRun(
+                task_id=task.id,
+                run_number=2,
+                worker_id="worker-task-api-test",
+                lock_token="task-api-test-token",
+                status="success",
+                started_at=NOW,
+                finished_at=finished_at,
+                duration_ms=120_000,
+                result_summary="已转存至 /Media/api.mkv",
+            )
+        )
+        task_id = task.id
+
+    with sessions() as session:
+        page = tasks_api.list_tasks(
+            db=session,
+            _=None,  # type: ignore[arg-type]
+            status="success",
+        )
+        detail = tasks_api.get_task(
+            task_id=task_id,
+            db=session,
+            _=None,  # type: ignore[arg-type]
+        )
+
+    assert page.total == 1
+    summary = page.items[0]
+    for item in (summary, detail):
+        assert item.started_at == NOW.replace(tzinfo=None)
+        assert item.finished_at == finished_at.replace(tzinfo=None)
+        assert item.next_attempt_at is None
+        assert item.message == "已转存至 /Media/api.mkv"
+        assert item.retry_count == 1
+        assert item.max_retries == 3
+        assert item.latest_run is not None
+        assert item.latest_run.run_number == 2
+        assert item.latest_run.duration_ms == 120_000
 
 
 def test_delete_subscription_preserves_terminal_task_run_history(

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminUser, DbSession
 from app.models import Task
@@ -32,18 +33,28 @@ def list_tasks(
     items = list(
         db.scalars(
             select(Task)
+            .options(selectinload(Task.runs))
             .where(*conditions)
             .order_by(Task.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
     )
-    return Page(items=items, page=page, page_size=page_size, total=total)
+    return Page[TaskRead](
+        items=[TaskRead.from_task(task) for task in items],
+        page=page,
+        page_size=page_size,
+        total=total,
+    )
 
 
 @router.get("/{task_id}", response_model=TaskRead)
-def get_task(task_id: int, db: DbSession, _: AdminUser) -> Task:
-    task = db.get(Task, task_id)
+def get_task(task_id: int, db: DbSession, _: AdminUser) -> TaskRead:
+    task = db.scalar(
+        select(Task)
+        .options(selectinload(Task.runs))
+        .where(Task.id == task_id)
+    )
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task
+    return TaskRead.from_task(task)
