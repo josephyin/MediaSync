@@ -19,6 +19,10 @@ from app.scheduler.enqueue import (
     ScheduledScanEnqueueResult,
     enqueue_due_scan_tasks,
 )
+from app.services.update_execution_gate import (
+    UpdateExecutionGate,
+    build_update_execution_gate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ class SchedulerRuntime:
         batch_size: int,
         enqueue: EnqueueOperation = enqueue_due_scan_tasks,
         clock: Clock = utcnow,
+        update_gate: UpdateExecutionGate | None = None,
     ) -> None:
         if batch_size < 1 or batch_size > 1000:
             raise ValueError("batch_size must be between 1 and 1000")
@@ -55,9 +60,18 @@ class SchedulerRuntime:
         self._batch_size = batch_size
         self._enqueue = enqueue
         self._clock = clock
+        self._update_gate = update_gate or build_update_execution_gate()
 
     def run_once(self) -> ScheduledScanEnqueueResult:
         with self._session_factory() as session, session.begin():
+            if self._update_gate.evaluate(session).blocked:
+                return ScheduledScanEnqueueResult(
+                    inspected_count=0,
+                    enqueued_count=0,
+                    skipped_active_count=0,
+                    task_ids=(),
+                    gated=True,
+                )
             return self._enqueue(
                 session,
                 scheduled_at=self._clock(),

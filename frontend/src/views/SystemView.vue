@@ -96,6 +96,17 @@ onMounted(loadStatus)
       show-icon
       class="section-gap"
     />
+    <el-alert
+      v-if="update?.runtime_mode !== 'normal'"
+      :title="update?.runtime_mode === 'draining' ? '更新任务排空中' : '候选版本验证模式'"
+      :description="update?.runtime_mode === 'draining'
+        ? 'Scheduler 已停止创建任务，Worker 将等待当前任务自然完成。'
+        : 'Provider 副作用已关闭，仅保留健康检查、登录和更新状态查询。'"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="section-gap"
+    />
 
     <div class="version-grid" v-loading="loading && !update">
       <el-card shadow="never" class="version-card current-card">

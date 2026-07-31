@@ -10,6 +10,7 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.exceptions import MediaSyncError
 from app.scheduler import start_scheduler, stop_scheduler
+from app.services.update_execution_gate import build_update_execution_gate
 
 settings = get_settings()
 logging.basicConfig(
@@ -50,6 +51,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router, prefix=settings.api_prefix)
+
+_CANDIDATE_SAFE_ENDPOINTS = {
+    ("GET", "/api/v1/system/health"),
+    ("GET", "/api/v1/system/update"),
+    ("GET", "/api/v1/auth/status"),
+    ("POST", "/api/v1/auth/login"),
+    ("POST", "/api/v1/auth/logout"),
+}
+
+
+@app.middleware("http")
+async def candidate_validation_guard(request: Request, call_next):
+    gate = build_update_execution_gate()
+    if gate.pending_marker_present():
+        from app.core.database import SessionLocal
+
+        with SessionLocal() as session:
+            decision = gate.evaluate(session)
+        if (
+            decision.mode in {"candidate_validation", "candidate_invalid"}
+            and (request.method, request.url.path) not in _CANDIDATE_SAFE_ENDPOINTS
+        ):
+            return JSONResponse(
+                status_code=423,
+                content={
+                    "detail": "候选版本验证中，当前接口已暂时关闭",
+                    "runtime_mode": decision.mode,
+                },
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")

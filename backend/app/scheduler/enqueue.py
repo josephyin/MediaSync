@@ -19,6 +19,7 @@ class ScheduledScanEnqueueResult:
     enqueued_count: int
     skipped_active_count: int
     task_ids: tuple[int, ...]
+    gated: bool = False
 
 
 def _as_utc(value: datetime) -> datetime:

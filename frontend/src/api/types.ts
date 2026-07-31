@@ -126,6 +126,15 @@ export interface DockerCapabilityInfo {
   message: string
 }
 
+export interface UpdateOperationInfo {
+  operation_id: string
+  status: string
+  source_version: string
+  target_version: string | null
+  created_at: string
+  completed_at: string | null
+}
+
 export interface UpdateStatus {
   current_version: string
   channel: 'stable' | 'rc'
@@ -135,6 +144,8 @@ export interface UpdateStatus {
   install_unavailable_reason: string | null
   docker_socket_enabled: boolean
   docker_capability: DockerCapabilityInfo
+  runtime_mode: string
+  operation: UpdateOperationInfo | null
   latest_release: UpdateRelease | null
   checked_at: string | null
   last_success_at: string | null
