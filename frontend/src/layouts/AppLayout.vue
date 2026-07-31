@@ -21,6 +21,7 @@ const navItems = [
   { path: '/subscriptions', label: '分享订阅', description: '监控与转存', icon: 'subscription' },
   { path: '/files', label: '文件记录', description: '发现与结果', icon: 'files' },
   { path: '/tasks', label: '任务中心', description: '执行与诊断', icon: 'tasks' },
+  { path: '/system', label: '系统设置', description: '版本与更新', icon: 'settings' },
 ]
 
 async function signOut() {
