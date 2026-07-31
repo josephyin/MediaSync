@@ -1,6 +1,6 @@
 # Docker Socket 一键镜像升级设计
 
-- 状态：草案
+- 状态：已接受
 - 日期：2026-07-31
 - 目标版本：v0.3
 - 相关决策：[ADR-0005：Docker Socket 可选一键镜像升级](adr/ADR-0005-optional-docker-socket-updater.md)
