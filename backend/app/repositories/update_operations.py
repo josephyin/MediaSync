@@ -113,6 +113,28 @@ class UpdateOperationRepository:
         self._session.flush()
         return operation
 
+    def set_verified_target(
+        self,
+        operation: UpdateOperation,
+        *,
+        target_version: str,
+        target_digest: str,
+    ) -> UpdateOperation:
+        if operation.active_slot != "global":
+            raise UpdateOperationStateError("terminal update operation cannot be reused")
+        if operation.status != "pulling":
+            raise UpdateOperationStateError(
+                "verified target can only be recorded while pulling"
+            )
+        if operation.target_version not in {None, target_version}:
+            raise UpdateOperationStateError("target version cannot be changed")
+        if operation.target_digest not in {None, target_digest}:
+            raise UpdateOperationStateError("target digest cannot be changed")
+        operation.target_version = target_version
+        operation.target_digest = target_digest
+        self._session.flush()
+        return operation
+
     @staticmethod
     def _validate_transition(current: str, target: str) -> None:
         if target not in ALLOWED_UPDATE_TRANSITIONS.get(current, set()):
