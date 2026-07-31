@@ -37,8 +37,31 @@
 
 ## 发布结果
 
-本节在 Tag、GitHub Release 和双 Registry 镜像发布完成后回填。
+- 发布提交：`8992d76698561ce1127ea53a1a28faeb7a6f2a52`；
+- Git Tag：`v0.2.0-rc.9`；
+- GitHub Release：已创建预发布版本；
+- 镜像工作流：`30598302777`，成功尝试耗时 5 分 8 秒；
+- 首次执行因 runner 长时间无终态被取消，第二次执行因 npm 网络
+  `ECONNRESET` 失败，第三次执行成功；
+- Docker Hub 中文说明自动同步成功；
+- Docker Hub 与 GHCR 的精确标签和 `rc` 标签均指向：
+  `sha256:07dc2dd17004df584d0cd5ccf8d8d0b3a804d35ad430f43815d87a19d859bffc`；
+- 四个标签均包含 `linux/amd64` 和 `linux/arm64` 镜像；
+- Docker Hub 镜像可在无登录配置下匿名拉取；
+- GHCR 镜像清单可在无登录配置下匿名读取。
 
 ## 远程镜像验收
 
-本节在拉取 Docker Hub 精确标签并完成 TaskRun API 验收后回填。
+- 验收镜像：`josephyjq/mediasync:v0.2.0-rc.9`；
+- 宿主端口映射：`19119:9090`，公共健康 API 返回 `{"status":"ok"}`；
+- 容器健康检查确认 `launcher`、`nginx`、`api`、`scheduler`、`worker`
+  五个组件全部健康；
+- OpenAPI 版本为 `0.2.0-rc.9`；
+- 默认管理员账号可以登录；
+- 在临时数据卷中写入一个终态 Task 和对应 TaskRun 后，任务列表 API 返回：
+  - 执行摘要：`远端 rc.9 执行信息验收通过`；
+  - `started_at` 和 `finished_at` 均有值；
+  - `retry_count=1`、`max_retries=3`；
+  - `next_attempt_at=null`，符合成功任务无需再次尝试的语义；
+  - `latest_run.run_number=2`、`duration_ms=45000`；
+- 验收结束后已删除临时容器和临时数据卷。
