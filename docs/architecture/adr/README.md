@@ -95,3 +95,4 @@ ADR-0002-task-execution-model.md
 | [ADR-0002](ADR-0002-task-execution-model.md) | 任务执行模型 | 已接受 |
 | [ADR-0003](ADR-0003-single-release-image.md) | 单一发布镜像，多进程容器拓扑 | 已由 ADR-0004 取代 |
 | [ADR-0004](ADR-0004-single-container-appliance.md) | 默认单容器 Appliance，保留多进程职责边界 | 已接受 |
+| [ADR-0005](ADR-0005-optional-docker-socket-updater.md) | Docker Socket 可选一键镜像升级 | 已接受 |
