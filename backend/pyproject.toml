@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mediasync-backend"
-version = "0.2.0rc8"
+version = "0.2.0rc9"
 description = "MediaSync 后端 API 服务"
 requires-python = ">=3.12,<3.14"
 dependencies = [

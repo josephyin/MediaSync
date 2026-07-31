@@ -2,6 +2,26 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.9] - 2026-07-31
+
+这是 v0.2 可靠性基础的第九个候选版本，修复 Task Engine v2 执行数据在任务
+中心缺失的问题。
+
+### 修复
+
+- 任务列表和详情从最新 TaskRun 投影执行摘要、开始时间和结束时间。
+- 任务中心使用 v2 的 `retry_count` 和 `max_retries` 显示真实重试进度。
+- 终态任务不再把空的 `next_attempt_at` 显示为无含义空值，而是区分无需重试、
+  已停止重试和已取消。
+- 补齐等待重试、等待凭证、正在取消和已取消等 v2 状态的中文显示。
+- 已有 TaskRun 历史升级后即可显示，不需要重新执行任务。
+
+### 兼容性
+
+- 本版本不包含数据库模型、迁移、Task Engine 状态机或 Provider 行为变化。
+- 从 rc.8 升级可直接复用原有 `/data` 和 `9090:9090` 端口映射。
+- 升级前仍应停止容器并完整备份 `/data`。
+
 ## [0.2.0-rc.8] - 2026-07-30
 
 这是 v0.2 可靠性基础的第八个候选版本，重点补齐正式版前的工程质量门禁、
@@ -220,6 +240,7 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.9]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.9
 [0.2.0-rc.8]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.8
 [0.2.0-rc.7]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.7
 [0.2.0-rc.6]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.6
