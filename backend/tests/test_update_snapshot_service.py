@@ -24,6 +24,7 @@ OPERATION_ID = "12345678-1234-4234-9234-123456789abc"
 CONTAINER_ID = "a" * 64
 SOURCE_IMAGE_ID = f"sha256:{'b' * 64}"
 TARGET_DIGEST = f"sha256:{'c' * 64}"
+TARGET_REVISION = "d" * 40
 SECRET_TEXT = "never-include-this-secret-in-manifest"
 
 
@@ -55,7 +56,7 @@ def write_handoff(data_directory: Path) -> Path:
     )
     return store.write(
         UpdaterHandoffIntent(
-            schema_version=1,
+            schema_version=2,
             operation_id=OPERATION_ID,
             current_container_id=CONTAINER_ID,
             source_image_id=SOURCE_IMAGE_ID,
@@ -64,6 +65,7 @@ def write_handoff(data_directory: Path) -> Path:
             source_digest=None,
             target_version="v0.3.0-rc.1",
             target_digest=TARGET_DIGEST,
+            target_revision=TARGET_REVISION,
             target_image=f"josephyjq/mediasync@{TARGET_DIGEST}",
             candidate=candidate(),
         )

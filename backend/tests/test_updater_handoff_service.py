@@ -191,6 +191,8 @@ async def test_prepare_writes_private_intent_and_creates_restricted_updater(
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     intent = json.loads(path.read_text(encoding="utf-8"))
     assert intent["target_image"] == f"josephyjq/mediasync@{DIGEST}"
+    assert intent["schema_version"] == 2
+    assert intent["target_revision"] == "d" * 40
     assert intent["source_image_id"] == SOURCE_IMAGE_ID
     assert intent["source_image_reference"] == "josephyjq/mediasync:v0.2.0-rc.9"
     assert intent["source_version"] == "v0.2.0-rc.9"

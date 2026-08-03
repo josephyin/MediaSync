@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from app.services.image_target_service import (
     DIGEST_PATTERN,
     OFFICIAL_REGISTRIES,
+    REVISION_PATTERN,
     VERSION_PATTERN,
 )
 from app.services.updater_handoff_service import (
@@ -69,7 +70,7 @@ class HandoffCandidate(StrictModel):
 
 
 class HandoffDocument(StrictModel):
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     operation_id: str
     current_container_id: str
     source_image_id: str
@@ -78,6 +79,7 @@ class HandoffDocument(StrictModel):
     source_digest: str | None
     target_version: str
     target_digest: str
+    target_revision: str
     target_image: str
     candidate: HandoffCandidate
 
@@ -232,6 +234,7 @@ def validate_handoff_document(document: HandoffDocument) -> None:
         or not VERSION_PATTERN.fullmatch(document.source_version)
         or not VERSION_PATTERN.fullmatch(document.target_version)
         or not DIGEST_PATTERN.fullmatch(document.target_digest)
+        or not REVISION_PATTERN.fullmatch(document.target_revision)
         or document.target_image
         != f"{document.target_image.rsplit('@', 1)[0]}@{document.target_digest}"
     ):

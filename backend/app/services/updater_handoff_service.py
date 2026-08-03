@@ -107,6 +107,7 @@ class UpdaterHandoffIntent:
     source_digest: str | None
     target_version: str
     target_digest: str
+    target_revision: str
     target_image: str
     candidate: CandidateContainerTemplate
 
@@ -197,7 +198,7 @@ class UpdaterHandoffService:
         )
         source = extract_source_image(current_container)
         intent = UpdaterHandoffIntent(
-            schema_version=1,
+            schema_version=2,
             operation_id=operation_id,
             current_container_id=template.container_id,
             source_image_id=source[0],
@@ -206,6 +207,7 @@ class UpdaterHandoffService:
             source_digest=source[3],
             target_version=target.version,
             target_digest=target.digest,
+            target_revision=target.revision,
             target_image=target.immutable_reference,
             candidate=template,
         )
