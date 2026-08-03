@@ -76,6 +76,13 @@ class UpdateOperationRepository:
             .limit(1)
         )
 
+    def get_by_operation_id(self, operation_id: str) -> UpdateOperation | None:
+        return self._session.scalar(
+            select(UpdateOperation)
+            .where(UpdateOperation.operation_id == operation_id)
+            .limit(1)
+        )
+
     def finish(
         self,
         operation: UpdateOperation,

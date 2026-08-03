@@ -27,6 +27,8 @@ from app.task_engine.worker import WorkerRuntime
 
 OPERATION_ID = "12345678-1234-4234-9234-123456789abc"
 DIGEST = f"sha256:{'a' * 64}"
+REVISION = "b" * 40
+CANDIDATE_TOKEN = "candidate-token-0123456789-abcdef"
 
 
 @pytest.fixture
@@ -57,6 +59,8 @@ def write_marker(path: Path, *, operation_id: str = OPERATION_ID) -> None:
                 "operation_id": operation_id,
                 "target_version": "0.3.0-rc.1",
                 "target_digest": DIGEST,
+                "target_revision": REVISION,
+                "candidate_token": CANDIDATE_TOKEN,
                 "mode": "candidate_validation",
             }
         ),

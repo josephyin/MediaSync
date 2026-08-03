@@ -14,6 +14,8 @@ from app.services.update_check_service import parse_version
 
 MAX_PENDING_MARKER_BYTES = 16 * 1024
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+CANDIDATE_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 GATED_UPDATE_STATUSES = frozenset(
     {
         "draining",
@@ -34,12 +36,22 @@ class UpdateGateDecision:
     operation_id: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PendingUpdateMarker:
+    operation_id: str
+    target_version: str
+    target_digest: str
+    target_revision: str
+    candidate_token: str
+    mode: str = "candidate_validation"
+
+
 class UpdateExecutionGate:
     def __init__(self, *, pending_path: str) -> None:
         self._pending_path = Path(pending_path)
 
     def evaluate(self, session: Session) -> UpdateGateDecision:
-        marker = self._read_pending_marker()
+        marker = self.read_pending_marker()
         if marker is not None:
             if isinstance(marker, str):
                 return UpdateGateDecision(
@@ -48,7 +60,7 @@ class UpdateExecutionGate:
                     reason=marker,
                 )
             active = UpdateOperationRepository(session).get_active()
-            if active is None or active.operation_id != marker["operation_id"]:
+            if active is None or active.operation_id != marker.operation_id:
                 return UpdateGateDecision(
                     blocked=True,
                     mode="candidate_invalid",
@@ -57,7 +69,7 @@ class UpdateExecutionGate:
             return UpdateGateDecision(
                 blocked=True,
                 mode="candidate_validation",
-                operation_id=marker["operation_id"],
+                operation_id=marker.operation_id,
             )
 
         active = UpdateOperationRepository(session).get_active()
@@ -75,7 +87,7 @@ class UpdateExecutionGate:
         except OSError:
             return True
 
-    def _read_pending_marker(self) -> dict[str, str] | str | None:
+    def read_pending_marker(self) -> PendingUpdateMarker | str | None:
         try:
             if not self._pending_path.exists():
                 return None
@@ -90,6 +102,8 @@ class UpdateExecutionGate:
             "operation_id",
             "target_version",
             "target_digest",
+            "target_revision",
+            "candidate_token",
             "mode",
         }:
             return "候选验证标记字段无效"
@@ -98,6 +112,8 @@ class UpdateExecutionGate:
         operation_id = payload.get("operation_id")
         target_version = payload.get("target_version")
         target_digest = payload.get("target_digest")
+        target_revision = payload.get("target_revision")
+        candidate_token = payload.get("candidate_token")
         try:
             uuid.UUID(operation_id)
         except (AttributeError, TypeError, ValueError):
@@ -108,12 +124,21 @@ class UpdateExecutionGate:
             target_digest
         ):
             return "候选验证目标摘要无效"
-        return {
-            "operation_id": operation_id,
-            "target_version": target_version,
-            "target_digest": target_digest,
-            "mode": "candidate_validation",
-        }
+        if not isinstance(target_revision, str) or not REVISION_PATTERN.fullmatch(
+            target_revision
+        ):
+            return "候选验证目标修订无效"
+        if not isinstance(candidate_token, str) or not CANDIDATE_TOKEN_PATTERN.fullmatch(
+            candidate_token
+        ):
+            return "候选验证令牌无效"
+        return PendingUpdateMarker(
+            operation_id=operation_id,
+            target_version=target_version,
+            target_digest=target_digest,
+            target_revision=target_revision,
+            candidate_token=candidate_token,
+        )
 
 
 def build_update_execution_gate() -> UpdateExecutionGate:
