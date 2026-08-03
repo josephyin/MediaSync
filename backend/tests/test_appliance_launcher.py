@@ -14,6 +14,7 @@ from app.appliance.launcher import (
     NGINX,
     RECONCILIATION,
     SCHEDULER,
+    UPDATE_RECONCILIATION,
     WORKER,
     ApplianceLauncher,
     ProcessSpec,
@@ -188,6 +189,25 @@ def test_launcher_runs_barriers_then_starts_processes_in_contract_order(
     def sleep(_seconds: float) -> None:
         stop.set()
 
+    class EvidenceObserver:
+        @staticmethod
+        def observe(components: Mapping[str, bool]) -> bool:
+            assert components == {
+                "launcher": True,
+                "api": True,
+                "nginx": True,
+                "scheduler": True,
+                "worker": True,
+            }
+            events.append("observe:candidate")
+            return True
+
+    class TerminalObserver:
+        @staticmethod
+        def reconcile() -> bool:
+            events.append("reconcile:update")
+            return False
+
     launcher = ApplianceLauncher(
         data_directory=tmp_path,
         environment=appliance_environment(),
@@ -197,21 +217,26 @@ def test_launcher_runs_barriers_then_starts_processes_in_contract_order(
         api_startup_timeout_seconds=12,
         sleep=sleep,
         health_socket_path=short_socket_path(),
+        candidate_evidence_observer=EvidenceObserver(),
+        update_terminal_observer=TerminalObserver(),
     )
 
     exit_code = launcher.run(stop=stop, install_signal_handlers=False)
 
     assert exit_code == 0
-    assert events[:8] == [
+    assert events[:10] == [
         "barrier:migration",
+        "barrier:update-reconciliation",
         "barrier:reconciliation",
         "start:api",
         "healthy:api",
         "start:nginx",
         "start:scheduler",
         "start:worker",
-        "terminate:nginx",
+        "observe:candidate",
+        "reconcile:update",
     ]
+    assert events[10] == "terminate:nginx"
     assert [event for event in events if event.startswith("terminate:")] == [
         "terminate:nginx",
         "terminate:scheduler",
@@ -244,7 +269,11 @@ def test_barrier_failure_prevents_all_process_startup(tmp_path: Path) -> None:
     exit_code = launcher.run(install_signal_handlers=False)
 
     assert exit_code == 1
-    assert events == ["barrier:migration", "barrier:reconciliation"]
+    assert events == [
+        "barrier:migration",
+        "barrier:update-reconciliation",
+        "barrier:reconciliation",
+    ]
 
 
 def test_api_health_failure_stops_api_and_prevents_other_processes(
@@ -350,6 +379,7 @@ def test_shutdown_force_kills_process_after_its_grace_period(
 
 
 def test_child_commands_are_explicit_argument_lists() -> None:
+    assert UPDATE_RECONCILIATION.command[-2:] == ("-m", "app.update_reconcile")
     assert API.command == (
         "uvicorn",
         "app.main:app",

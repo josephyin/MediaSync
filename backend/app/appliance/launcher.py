@@ -19,11 +19,20 @@ from app.appliance.health import (
     DEFAULT_HEALTH_SOCKET_PATH,
     ApplianceHealthServer,
 )
+from app.core.config import get_settings
 from app.core.runtime_secrets import (
     RUNTIME_CONFIG_DIRECTORY,
     RUNTIME_SECRETS_FILENAME,
     RuntimeSecretsError,
     prepare_runtime_secrets,
+)
+from app.services.candidate_evidence_service import (
+    CandidateEvidenceError,
+    CandidateEvidenceService,
+)
+from app.update_reconcile import (
+    UpdateReconciliationError,
+    UpdateTerminalReconciler,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +58,14 @@ class ManagedProcess(Protocol):
     def wait(self, timeout: float | None = None) -> int: ...
 
 
+class CandidateEvidenceObserver(Protocol):
+    def observe(self, components: Mapping[str, bool]) -> bool: ...
+
+
+class UpdateTerminalObserver(Protocol):
+    def reconcile(self) -> bool: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessSpec:
     name: str
@@ -64,6 +81,11 @@ MIGRATION = ProcessSpec(
 RECONCILIATION = ProcessSpec(
     name="reconciliation",
     command=(sys.executable, "-m", "app.reconcile"),
+    shutdown_timeout_seconds=0,
+)
+UPDATE_RECONCILIATION = ProcessSpec(
+    name="update-reconciliation",
+    command=(sys.executable, "-m", "app.update_reconcile"),
     shutdown_timeout_seconds=0,
 )
 API = ProcessSpec(
@@ -102,7 +124,7 @@ WORKER = ProcessSpec(
     shutdown_timeout_seconds=90,
 )
 
-BARRIER_SPECS = (MIGRATION, RECONCILIATION)
+BARRIER_SPECS = (MIGRATION, UPDATE_RECONCILIATION, RECONCILIATION)
 STARTUP_SPECS = (NGINX, SCHEDULER, WORKER)
 SHUTDOWN_ORDER = ("nginx", "scheduler", "worker", "api")
 
@@ -181,6 +203,8 @@ class ApplianceLauncher:
         supervision_poll_seconds: float = 0.5,
         sleep: Sleep = time.sleep,
         health_socket_path: Path = DEFAULT_HEALTH_SOCKET_PATH,
+        candidate_evidence_observer: CandidateEvidenceObserver | None = None,
+        update_terminal_observer: UpdateTerminalObserver | None = None,
     ) -> None:
         if api_startup_timeout_seconds <= 0:
             raise ValueError("api_startup_timeout_seconds must be positive")
@@ -197,6 +221,8 @@ class ApplianceLauncher:
         self._sleep = sleep
         self._health_socket_path = Path(health_socket_path)
         self._health_server: ApplianceHealthServer | None = None
+        self._candidate_evidence_observer = candidate_evidence_observer
+        self._update_terminal_observer = update_terminal_observer
         self._children: dict[str, tuple[ProcessSpec, ManagedProcess]] = {}
 
     def prepare_environment(self) -> dict[str, str]:
@@ -249,6 +275,33 @@ class ApplianceLauncher:
 
         try:
             environment = self.prepare_environment()
+            if self._candidate_evidence_observer is None:
+                self._candidate_evidence_observer = CandidateEvidenceService(
+                    data_directory=self._data_directory,
+                    pending_path=self._data_directory / "update" / "pending.json",
+                    environment=environment,
+                    app_version=environment.get(
+                        "APP_VERSION",
+                        get_settings().app_version,
+                    ),
+                )
+            if self._update_terminal_observer is None:
+                from sqlalchemy import create_engine
+                from sqlalchemy.orm import sessionmaker
+
+                update_engine = create_engine(
+                    f"sqlite:///{self._data_directory / 'mediasync.db'}",
+                    connect_args={"check_same_thread": False},
+                )
+                self._update_terminal_observer = UpdateTerminalReconciler(
+                    session_factory=sessionmaker(
+                        bind=update_engine,
+                        expire_on_commit=False,
+                    ),
+                    data_directory=self._data_directory,
+                    pending_path=self._data_directory / "update" / "pending.json",
+                    allow_active_success=True,
+                )
             self._run_startup_barriers(environment)
             self._start(API, environment)
             self._api_waiter(
@@ -320,6 +373,18 @@ class ApplianceLauncher:
                     if return_code < 0:
                         return 128 + abs(return_code)
                     return return_code if return_code != 0 else 1
+            if self._candidate_evidence_observer is not None:
+                try:
+                    self._candidate_evidence_observer.observe(
+                        self._component_status()
+                    )
+                except CandidateEvidenceError as exc:
+                    logger.warning("candidate_evidence_not_ready reason=%s", exc)
+            if self._update_terminal_observer is not None:
+                try:
+                    self._update_terminal_observer.reconcile()
+                except UpdateReconciliationError as exc:
+                    logger.warning("update_terminal_reconciliation_pending reason=%s", exc)
             self._sleep(self._supervision_poll_seconds)
         return 0
 
