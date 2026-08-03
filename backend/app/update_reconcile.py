@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+from app.models import UpdateOperation
 from app.repositories import UpdateOperationRepository
 from app.services.candidate_evidence_service import (
     CandidateEvidenceError,
@@ -89,20 +90,21 @@ class UpdateTerminalReconciler:
                     raise UpdateReconciliationError("活动更新不能直接接受 SUCCESS 结果")
                 if result.status == "commit_requested" and not self._allow_active_commit:
                     return False
-                expected_source = (
-                    "verifying" if result.status == "commit_requested" else "rolling_back"
-                )
-                if operation.status != expected_source:
-                    raise UpdateReconciliationError("updater 终态与活动更新状态不匹配")
                 terminal_status = (
                     "success" if result.status == "commit_requested" else result.status
                 )
                 if result.status == "commit_requested":
+                    if operation.status != "verifying":
+                        raise UpdateReconciliationError(
+                            "updater 提交请求与活动更新状态不匹配"
+                        )
                     self._validate_success_evidence(
                         marker,
                         operation.target_version,
                         operation.target_digest,
                     )
+                else:
+                    self._advance_rollback_state(repository, operation, marker)
                 repository.finish(
                     operation,
                     status=terminal_status,
@@ -116,6 +118,30 @@ class UpdateTerminalReconciler:
 
         self._cleanup(marker.operation_id)
         return True
+
+    @staticmethod
+    def _advance_rollback_state(
+        repository: UpdateOperationRepository,
+        operation: UpdateOperation,
+        marker: PendingUpdateMarker,
+    ) -> None:
+        if (
+            operation.target_version != marker.target_version
+            or operation.target_digest != marker.target_digest
+        ):
+            raise UpdateReconciliationError("回滚结果与更新目标不匹配")
+        paths = {
+            "handoff": ("snapshotting", "rolling_back"),
+            "snapshotting": ("rolling_back",),
+            "switching": ("rolling_back",),
+            "verifying": ("rolling_back",),
+            "rolling_back": (),
+        }
+        transitions = paths.get(operation.status)
+        if transitions is None:
+            raise UpdateReconciliationError("回滚终态与活动更新状态不匹配")
+        for status in transitions:
+            repository.transition_active(operation, status=status)
 
     def _read_marker(self) -> PendingUpdateMarker | None:
         marker = UpdateExecutionGate(pending_path=str(self._pending_path)).read_pending_marker()
