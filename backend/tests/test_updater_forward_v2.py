@@ -16,6 +16,7 @@ from app.services.updater_handoff_service import (
     UpdaterHandoffIntent,
     UpdaterHandoffStore,
 )
+from app.services.updater_rollback_v2 import UpdaterRollbackV2
 from app.services.updater_state_machine import UpdaterStateMachineError
 
 OPERATION_ID = "12345678-1234-4234-9234-123456789abc"
@@ -155,7 +156,8 @@ class MutableEngine:
 
     async def stop_container(self, container_id: str, *, timeout_seconds: int) -> None:
         assert timeout_seconds == 90
-        self.calls["stop_old"] += 1
+        key = "stop_candidate" if container_id == CANDIDATE_ID else "stop_old"
+        self.calls[key] += 1
         self.containers[container_id]["State"]["Running"] = False
 
     async def wait_container(self, container_id: str) -> int:
@@ -195,11 +197,13 @@ class MutableEngine:
         return CANDIDATE_ID
 
     async def start_container(self, container_id: str) -> None:
-        self.calls["start_candidate"] += 1
+        key = "start_candidate" if container_id == CANDIDATE_ID else "start_old"
+        self.calls[key] += 1
         self.containers[container_id]["State"]["Running"] = True
 
     async def remove_container(self, container_id: str) -> None:
-        self.calls["remove_old"] += 1
+        key = "remove_candidate" if container_id == CANDIDATE_ID else "remove_old"
+        self.calls[key] += 1
         self.containers.pop(container_id)
 
 
@@ -223,6 +227,11 @@ class FakeSnapshotService:
             raise AssertionError("snapshot missing")
         return directory, object()
 
+    def restore(self, *, operation_id: str):
+        self.calls["restore"] += 1
+        self.verify(operation_id=operation_id)
+        return object()
+
 
 class FakeVerifier:
     def __init__(self) -> None:
@@ -239,6 +248,15 @@ class FakeCommitWaiter:
 
     async def wait(self, *, operation_id: str) -> None:
         assert operation_id == OPERATION_ID
+        self.calls += 1
+
+
+class FakePreviousVerifier:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def verify(self, _document, container_id: str) -> None:
+        assert container_id == SOURCE_ID
         self.calls += 1
 
 
@@ -277,6 +295,32 @@ def executor(
         ),
         verifier=verifier,
         commit_waiter=waiter,
+        fault_hook=fault_hook,
+    )
+
+
+def rollback_executor(
+    tmp_path: Path,
+    *,
+    engine: MutableEngine,
+    snapshot: FakeSnapshotService,
+    previous_verifier: FakePreviousVerifier,
+    fault_hook=None,
+) -> UpdaterRollbackV2:
+    return UpdaterRollbackV2(
+        engine=engine,
+        data_directory=tmp_path,
+        socket_path=SOCKET_PATH,
+        coordinator_container_id=COORDINATOR_ID,
+        snapshot_service=snapshot,  # type: ignore[arg-type]
+        candidate_service=UpdaterCandidateService(
+            pending_path=tmp_path / "update" / "pending.json",
+            token_factory=lambda: CANDIDATE_TOKEN,
+        ),
+        journal=UpdaterResultJournal(
+            directory=str(tmp_path / "update" / "operations")
+        ),
+        previous_verifier=previous_verifier,
         fault_hook=fault_hook,
     )
 
@@ -429,3 +473,277 @@ async def test_resume_refuses_tampered_candidate_before_start(tmp_path: Path) ->
         ).execute(operation_id=OPERATION_ID)
 
     assert engine.calls["start_candidate"] == 0
+
+
+async def prepare_candidate_for_rollback(
+    tmp_path: Path,
+) -> tuple[MutableEngine, FakeSnapshotService, FakePreviousVerifier]:
+    write_handoff(tmp_path)
+    engine = MutableEngine()
+    snapshot = FakeSnapshotService(tmp_path)
+    verifier = FakeVerifier()
+    waiter = FakeCommitWaiter()
+    fault = OneShotFault("after_checkpoint:switching:candidate_started")
+    with pytest.raises(SimulatedCrash):
+        await executor(
+            tmp_path,
+            engine=engine,
+            snapshot=snapshot,
+            verifier=verifier,
+            waiter=waiter,
+            fault_hook=fault,
+        ).execute(operation_id=OPERATION_ID)
+    return engine, snapshot, FakePreviousVerifier()
+
+
+@pytest.mark.asyncio
+async def test_rollback_v2_restores_old_container_and_publishes_terminal(
+    tmp_path: Path,
+) -> None:
+    engine, snapshot, previous = await prepare_candidate_for_rollback(tmp_path)
+    evidence = tmp_path / "update" / "operations" / f"{OPERATION_ID}.candidate.json"
+    evidence.write_text("stale", encoding="utf-8")
+
+    await rollback_executor(
+        tmp_path,
+        engine=engine,
+        snapshot=snapshot,
+        previous_verifier=previous,
+    ).execute(operation_id=OPERATION_ID)
+
+    result = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    source = engine.containers[SOURCE_ID]
+    assert result.status == "rolled_back"
+    assert result.checkpoint == "rollback_published"
+    assert result.sequence == 19
+    assert CANDIDATE_ID not in engine.containers
+    assert source["Name"] == "/MediaSync"
+    assert source["State"]["Running"] is True
+    assert source["HostConfig"]["RestartPolicy"] == {
+        "Name": "unless-stopped",
+        "MaximumRetryCount": 0,
+    }
+    assert engine.calls["stop_candidate"] == 1
+    assert engine.calls["remove_candidate"] == 1
+    assert engine.calls["start_old"] == 1
+    assert snapshot.calls["restore"] == 1
+    assert previous.calls == 1
+    assert not evidence.exists()
+
+
+ROLLBACK_FAULTS = (
+    "before:rollback_started",
+    "after_effect:rollback_started",
+    "after_checkpoint:rolling_back:rollback_started",
+    "before:candidate_stopped",
+    "after_effect:candidate_stopped",
+    "after_checkpoint:rolling_back:candidate_stopped",
+    "before:candidate_removed",
+    "after_effect:candidate_removed",
+    "after_checkpoint:rolling_back:candidate_removed",
+    "before:snapshot_restored",
+    "after_effect:snapshot_restored",
+    "after_checkpoint:rolling_back:snapshot_restored",
+    "before:candidate_evidence_removed",
+    "after_effect:candidate_evidence_removed",
+    "after_checkpoint:rolling_back:candidate_evidence_removed",
+    "before:old_name_restored",
+    "after_effect:old_name_restored",
+    "after_checkpoint:rolling_back:old_name_restored",
+    "before:old_policy_restored",
+    "after_effect:old_policy_restored",
+    "after_checkpoint:rolling_back:old_policy_restored",
+    "before:old_started",
+    "after_effect:old_started",
+    "after_checkpoint:rolling_back:old_started",
+    "before:old_verified",
+    "after_effect:old_verified",
+    "after_checkpoint:rolling_back:old_verified",
+    "before:rollback_published",
+    "after_effect:rollback_published",
+    "after_checkpoint:rolling_back:rollback_published",
+    "after_checkpoint:rolled_back:rollback_published",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault_event", ROLLBACK_FAULTS)
+async def test_interrupted_rollback_resumes_same_attempt(
+    tmp_path: Path,
+    fault_event: str,
+) -> None:
+    engine, snapshot, previous = await prepare_candidate_for_rollback(tmp_path)
+    fault = OneShotFault(fault_event)
+
+    with pytest.raises(SimulatedCrash):
+        await rollback_executor(
+            tmp_path,
+            engine=engine,
+            snapshot=snapshot,
+            previous_verifier=previous,
+            fault_hook=fault,
+        ).execute(operation_id=OPERATION_ID)
+
+    await rollback_executor(
+        tmp_path,
+        engine=engine,
+        snapshot=snapshot,
+        previous_verifier=previous,
+    ).execute(operation_id=OPERATION_ID)
+
+    result = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    assert result.status == "rolled_back"
+    assert engine.calls["stop_candidate"] == 1
+    assert engine.calls["remove_candidate"] == 1
+    assert engine.calls["start_old"] == 1
+    assert engine.calls["rename_old"] == 2
+    assert engine.calls["restart_policy"] == 2
+    assert snapshot.calls["restore"] in {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_rollback_without_candidate_snapshot_or_rename_is_valid_noop(
+    tmp_path: Path,
+) -> None:
+    write_handoff(tmp_path)
+    engine = MutableEngine()
+    snapshot = FakeSnapshotService(tmp_path)
+    forward_fault = OneShotFault("after_checkpoint:snapshotting:old_stopped")
+    with pytest.raises(SimulatedCrash):
+        await executor(
+            tmp_path,
+            engine=engine,
+            snapshot=snapshot,
+            verifier=FakeVerifier(),
+            waiter=FakeCommitWaiter(),
+            fault_hook=forward_fault,
+        ).execute(operation_id=OPERATION_ID)
+    previous = FakePreviousVerifier()
+
+    await rollback_executor(
+        tmp_path,
+        engine=engine,
+        snapshot=snapshot,
+        previous_verifier=previous,
+    ).execute(operation_id=OPERATION_ID)
+
+    result = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    assert result.status == "rolled_back"
+    assert result.candidate_token_hash is not None
+    assert engine.calls["create_candidate"] == 0
+    assert engine.calls["remove_candidate"] == 0
+    assert engine.calls["rename_old"] == 0
+    assert snapshot.calls["restore"] == 0
+    assert (tmp_path / "update" / "pending.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_rollback_discovers_candidate_created_before_id_checkpoint(
+    tmp_path: Path,
+) -> None:
+    write_handoff(tmp_path)
+    engine = MutableEngine()
+    snapshot = FakeSnapshotService(tmp_path)
+    forward_fault = OneShotFault("after_effect:candidate_created")
+    with pytest.raises(SimulatedCrash):
+        await executor(
+            tmp_path,
+            engine=engine,
+            snapshot=snapshot,
+            verifier=FakeVerifier(),
+            waiter=FakeCommitWaiter(),
+            fault_hook=forward_fault,
+        ).execute(operation_id=OPERATION_ID)
+    before = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    assert before.candidate_container_id is None
+    assert CANDIDATE_ID in engine.containers
+
+    await rollback_executor(
+        tmp_path,
+        engine=engine,
+        snapshot=snapshot,
+        previous_verifier=FakePreviousVerifier(),
+    ).execute(operation_id=OPERATION_ID)
+
+    after = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    assert after.status == "rolled_back"
+    assert after.candidate_container_id == CANDIDATE_ID
+    assert CANDIDATE_ID not in engine.containers
+
+
+@pytest.mark.asyncio
+async def test_candidate_identity_conflict_enters_rollback_failed(
+    tmp_path: Path,
+) -> None:
+    engine, snapshot, previous = await prepare_candidate_for_rollback(tmp_path)
+    engine.containers[CANDIDATE_ID]["Config"]["Env"] = [
+        "MEDIASYNC_CANDIDATE_TOKEN=tampered-token-0123456789-abcdef"
+    ]
+
+    with pytest.raises(UpdaterStateMachineError, match="身份无法安全确认"):
+        await rollback_executor(
+            tmp_path,
+            engine=engine,
+            snapshot=snapshot,
+            previous_verifier=previous,
+        ).execute(operation_id=OPERATION_ID)
+
+    result = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    assert result.status == "rollback_failed"
+    assert CANDIDATE_ID in engine.containers
+    assert engine.calls["stop_candidate"] == 0
+
+
+@pytest.mark.asyncio
+async def test_transient_engine_error_keeps_rollback_retriable(
+    tmp_path: Path,
+) -> None:
+    engine, snapshot, previous = await prepare_candidate_for_rollback(tmp_path)
+    original_remove = engine.remove_container
+    failed_once = False
+
+    async def transient_remove(container_id: str) -> None:
+        nonlocal failed_once
+        if container_id == CANDIDATE_ID and not failed_once:
+            failed_once = True
+            raise RuntimeError("docker temporarily unavailable")
+        await original_remove(container_id)
+
+    engine.remove_container = transient_remove  # type: ignore[method-assign]
+
+    with pytest.raises(UpdaterStateMachineError, match="可从当前检查点重试"):
+        await rollback_executor(
+            tmp_path,
+            engine=engine,
+            snapshot=snapshot,
+            previous_verifier=previous,
+        ).execute(operation_id=OPERATION_ID)
+
+    current = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    assert current.status == "rolling_back"
+    assert current.checkpoint == "candidate_stopped"
+
+    await rollback_executor(
+        tmp_path,
+        engine=engine,
+        snapshot=snapshot,
+        previous_verifier=previous,
+    ).execute(operation_id=OPERATION_ID)
+    terminal = UpdaterResultJournal(
+        directory=str(tmp_path / "update" / "operations")
+    ).read(operation_id=OPERATION_ID)
+    assert terminal.status == "rolled_back"
