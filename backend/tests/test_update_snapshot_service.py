@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from app.services.update_snapshot_service import (
+    FORWARD_CHECKPOINTS,
+    ROLLBACK_CHECKPOINTS,
     UpdaterResultJournal,
+    UpdaterResultV2,
     UpdateSnapshotError,
     UpdateSnapshotService,
     read_handoff,
@@ -22,9 +25,12 @@ from app.services.updater_handoff_service import (
 
 OPERATION_ID = "12345678-1234-4234-9234-123456789abc"
 CONTAINER_ID = "a" * 64
+COORDINATOR_ID = "e" * 64
+CANDIDATE_ID = "f" * 64
 SOURCE_IMAGE_ID = f"sha256:{'b' * 64}"
 TARGET_DIGEST = f"sha256:{'c' * 64}"
 TARGET_REVISION = "d" * 40
+CANDIDATE_TOKEN_HASH = f"sha256:{'9' * 64}"
 SECRET_TEXT = "never-include-this-secret-in-manifest"
 
 
@@ -271,3 +277,276 @@ def test_commit_requested_cannot_transition_to_rollback(tmp_path: Path) -> None:
 
     with pytest.raises(UpdateSnapshotError, match="状态转换无效"):
         journal.transition(operation_id=OPERATION_ID, status="rolling_back")
+
+
+def start_v2_journal(tmp_path: Path) -> tuple[UpdaterResultJournal, UpdaterResultV2]:
+    document = read_handoff(
+        write_handoff(tmp_path),
+        expected_operation_id=OPERATION_ID,
+    )
+    journal = UpdaterResultJournal(directory=str(tmp_path / "update" / "operations"))
+    return journal, journal.start_v2(
+        document=document,
+        coordinator_container_id=COORDINATOR_ID,
+    )
+
+
+def test_v2_result_persists_immutable_identity_and_reads_by_schema(
+    tmp_path: Path,
+) -> None:
+    journal, first = start_v2_journal(tmp_path)
+
+    loaded = journal.read(operation_id=OPERATION_ID)
+
+    assert isinstance(loaded, UpdaterResultV2)
+    assert loaded == first
+    assert loaded.schema_version == 2
+    assert loaded.sequence == 1
+    assert loaded.checkpoint == "initialized"
+    assert loaded.recovery_generation == 0
+    assert loaded.coordinator_container_id == COORDINATOR_ID
+    assert loaded.source_container_id == CONTAINER_ID
+    assert loaded.source_image_id == SOURCE_IMAGE_ID
+    assert loaded.source_container_name == "MediaSync"
+    assert loaded.target_image == f"josephyjq/mediasync@{TARGET_DIGEST}"
+    assert loaded.target_revision == TARGET_REVISION
+    with pytest.raises(UpdateSnapshotError, match="v2"):
+        journal.transition(operation_id=OPERATION_ID, status="switching")
+
+
+def test_v1_result_remains_readable_and_rejects_v2_write_interface(
+    tmp_path: Path,
+) -> None:
+    journal = UpdaterResultJournal(directory=str(tmp_path / "operations"))
+    journal.start(operation_id=OPERATION_ID)
+
+    assert journal.read(operation_id=OPERATION_ID).schema_version == 1
+    with pytest.raises(UpdateSnapshotError, match="v1"):
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="snapshotting",
+            checkpoint="old_restart_fenced",
+        )
+
+
+def test_v2_normal_checkpoints_are_sequential_and_terminal_is_immutable(
+    tmp_path: Path,
+) -> None:
+    journal, _first = start_v2_journal(tmp_path)
+    for checkpoint in FORWARD_CHECKPOINTS[1:3]:
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="snapshotting",
+            checkpoint=checkpoint,  # type: ignore[arg-type]
+        )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="pending_ready",
+        candidate_token_hash=CANDIDATE_TOKEN_HASH,
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="snapshot_verified",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="switching",
+        checkpoint="old_renamed",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="switching",
+        checkpoint="candidate_created",
+        candidate_container_id=CANDIDATE_ID,
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="switching",
+        checkpoint="candidate_started",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="verifying",
+        checkpoint="candidate_started",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="verifying",
+        checkpoint="candidate_verified",
+    )
+    requested = journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="commit_requested",
+        checkpoint="commit_requested",
+    )
+    terminal = journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="success",
+        checkpoint="commit_requested",
+    )
+
+    assert requested.sequence == 11
+    assert terminal.sequence == 12
+    assert terminal.candidate_container_id == CANDIDATE_ID
+    assert terminal.candidate_token_hash == CANDIDATE_TOKEN_HASH
+    with pytest.raises(UpdateSnapshotError, match="终态"):
+        journal.takeover_v2(
+            operation_id=OPERATION_ID,
+            coordinator_container_id="1" * 64,
+        )
+
+
+def test_v2_checkpoint_cannot_skip_or_move_backwards(tmp_path: Path) -> None:
+    journal, _first = start_v2_journal(tmp_path)
+
+    with pytest.raises(UpdateSnapshotError, match="不可倒退或跳步"):
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="snapshotting",
+            checkpoint="old_stopped",
+        )
+
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="old_restart_fenced",
+    )
+    with pytest.raises(UpdateSnapshotError, match="不可倒退或跳步"):
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="snapshotting",
+            checkpoint="initialized",
+        )
+
+
+def test_v2_candidate_identity_cannot_change_after_persisted(tmp_path: Path) -> None:
+    journal, _first = start_v2_journal(tmp_path)
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="old_restart_fenced",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="old_stopped",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="pending_ready",
+        candidate_token_hash=CANDIDATE_TOKEN_HASH,
+    )
+
+    with pytest.raises(UpdateSnapshotError, match="令牌哈希不可修改"):
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="snapshotting",
+            checkpoint="snapshot_verified",
+            candidate_token_hash=f"sha256:{'8' * 64}",
+        )
+
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="snapshot_verified",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="switching",
+        checkpoint="old_renamed",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="switching",
+        checkpoint="candidate_created",
+        candidate_container_id=CANDIDATE_ID,
+    )
+
+    with pytest.raises(UpdateSnapshotError, match="候选容器标识不可修改"):
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="switching",
+            checkpoint="candidate_started",
+            candidate_container_id="7" * 64,
+        )
+
+
+def test_v2_takeover_generation_is_bounded(tmp_path: Path) -> None:
+    journal, _first = start_v2_journal(tmp_path)
+
+    for generation in range(1, 4):
+        record = journal.takeover_v2(
+            operation_id=OPERATION_ID,
+            coordinator_container_id=str(generation) * 64,
+        )
+        assert record.recovery_generation == generation
+        assert record.sequence == generation + 1
+
+    with pytest.raises(UpdateSnapshotError, match="已达上限"):
+        journal.takeover_v2(
+            operation_id=OPERATION_ID,
+            coordinator_container_id="4" * 64,
+        )
+
+
+def test_v2_rollback_checkpoints_only_continue_original_direction(
+    tmp_path: Path,
+) -> None:
+    journal, _first = start_v2_journal(tmp_path)
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="old_restart_fenced",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="old_stopped",
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="snapshotting",
+        checkpoint="pending_ready",
+        candidate_token_hash=CANDIDATE_TOKEN_HASH,
+    )
+    journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="rolling_back",
+        checkpoint="rollback_started",
+        rollback_started=True,
+    )
+    for checkpoint in ROLLBACK_CHECKPOINTS[1:]:
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="rolling_back",
+            checkpoint=checkpoint,  # type: ignore[arg-type]
+        )
+    terminal = journal.checkpoint_v2(
+        operation_id=OPERATION_ID,
+        status="rolled_back",
+        checkpoint="rollback_published",
+    )
+
+    assert terminal.rollback_started is True
+    assert terminal.status == "rolled_back"
+    with pytest.raises(UpdateSnapshotError, match="终态"):
+        journal.checkpoint_v2(
+            operation_id=OPERATION_ID,
+            status="rolling_back",
+            checkpoint="old_verified",
+            rollback_started=True,
+        )
+
+
+def test_v2_reader_rejects_invalid_status_checkpoint_pair(tmp_path: Path) -> None:
+    journal, _first = start_v2_journal(tmp_path)
+    path = tmp_path / "update" / "operations" / f"{OPERATION_ID}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["status"] = "success"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(UpdateSnapshotError, match="结果日志无效"):
+        journal.read(operation_id=OPERATION_ID)
