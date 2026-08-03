@@ -2,6 +2,41 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.10] - 2026-08-03
+
+这是 v0.2 可靠性基础的第十个候选版本，提供一键镜像更新的只读检查界面与
+Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练；安装 API 和 Web
+更新按钮仍未开放。
+
+### 新增
+
+- 系统页面增加版本检查、发布通道和 Docker 能力只读状态。
+- 新增更新操作持久化模型、排空闸门、目标镜像 digest 与 OCI 标签校验。
+- 新增 `/data` 完整快照、Updater 交接文档、候选容器证据和健康验证契约。
+- 新增 `python -m app.updater` 恢复协调器运行入口。
+
+### 可靠性
+
+- Updater 采用两阶段提交，`COMMIT_REQUESTED` 之后禁止恢复旧快照或启动旧容器。
+- 前向与回滚路径使用持久检查点，可在副作用完成但检查点尚未写入时对账恢复。
+- 持久 helper 使用独占 `flock`、严格容器身份校验和 restart-policy fencing。
+- 新 helper 接管时使用 recovery generation 限制，最多自动恢复 3 代。
+- 终态 helper 必须确认重启策略解除后退出，并由严格清理服务移除。
+
+### 验证
+
+- 前向和回滚故障矩阵覆盖副作用调用前、成功后以及检查点写入前后。
+- CI 使用真实 Docker 验证 helper 异常重启、重新持锁、解除重启策略和释放锁。
+- 提供群晖、飞牛真实 NAS 故障演练脚本、证据矩阵和失败关闭说明。
+
+### 安全与兼容性
+
+- Docker Socket 仍是可选高权限能力，普通部署不需要也不会默认挂载。
+- 本版本不会从 Web 发起镜像安装；用户不得把只读版本检查误认为一键更新已开放。
+- 数据库会自动升级到 `0007_update_operations`；升级前必须停止容器并完整备份
+  `/data`，不得只备份 SQLite。
+- 现有单容器部署继续使用一个 `9090` 端口和同一个 `/data` 映射。
+
 ## [0.2.0-rc.9] - 2026-07-31
 
 这是 v0.2 可靠性基础的第九个候选版本，修复 Task Engine v2 执行数据在任务
@@ -240,6 +275,7 @@
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.10]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.10
 [0.2.0-rc.9]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.9
 [0.2.0-rc.8]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.8
 [0.2.0-rc.7]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.7
