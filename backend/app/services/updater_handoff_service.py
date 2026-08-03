@@ -18,6 +18,7 @@ from app.services.docker_capability_service import (
     validate_current_container,
 )
 from app.services.image_target_service import (
+    DIGEST_PATTERN,
     VerifiedImageTarget,
     validate_resolved_target,
 )
@@ -100,6 +101,10 @@ class UpdaterHandoffIntent:
     schema_version: int
     operation_id: str
     current_container_id: str
+    source_image_id: str
+    source_image_reference: str
+    source_version: str
+    source_digest: str | None
     target_version: str
     target_digest: str
     target_image: str
@@ -190,10 +195,15 @@ class UpdaterHandoffService:
             current_container,
             socket_path=self.socket_path,
         )
+        source = extract_source_image(current_container)
         intent = UpdaterHandoffIntent(
             schema_version=1,
             operation_id=operation_id,
             current_container_id=template.container_id,
+            source_image_id=source[0],
+            source_image_reference=source[1],
+            source_version=source[2],
+            source_digest=source[3],
             target_version=target.version,
             target_digest=target.digest,
             target_image=target.immutable_reference,
@@ -267,6 +277,28 @@ def extract_candidate_template(
         group_add=string_tuple(host.get("GroupAdd")),
         readonly_rootfs=host.get("ReadonlyRootfs") is True,
     )
+
+
+def extract_source_image(
+    container: dict[str, Any],
+) -> tuple[str, str, str, str | None]:
+    image_id = container.get("Image")
+    config = require_mapping(container.get("Config"), "当前容器配置不完整")
+    reference = config.get("Image")
+    labels = extract_labels(config.get("Labels"))
+    version = labels.get("org.opencontainers.image.version")
+    if (
+        not isinstance(image_id, str)
+        or not DIGEST_PATTERN.fullmatch(image_id)
+        or not isinstance(reference, str)
+        or not reference
+        or not isinstance(version, str)
+        or not version
+    ):
+        raise UpdaterHandoffError("当前镜像元数据不完整")
+    _, separator, digest = reference.rpartition("@")
+    source_digest = digest if separator and DIGEST_PATTERN.fullmatch(digest) else None
+    return image_id, reference, version, source_digest
 
 
 def build_updater_create_config(

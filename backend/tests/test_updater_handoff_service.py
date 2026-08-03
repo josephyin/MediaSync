@@ -26,6 +26,7 @@ from app.services.updater_handoff_service import (
 
 CONTAINER_ID = "a" * 64
 UPDATER_ID = "b" * 64
+SOURCE_IMAGE_ID = f"sha256:{'e' * 64}"
 OPERATION_ID = "12345678-1234-4234-9234-123456789abc"
 DIGEST = f"sha256:{'c' * 64}"
 SOCKET_PATH = "/var/run/docker.sock"
@@ -45,7 +46,9 @@ def current_container() -> dict[str, Any]:
     return {
         "Id": CONTAINER_ID,
         "Name": "/MediaSync",
+        "Image": SOURCE_IMAGE_ID,
         "Config": {
+            "Image": "josephyjq/mediasync:v0.2.0-rc.9",
             "Cmd": APPLIANCE_COMMAND,
             "Env": ["ADMIN_PASSWORD=secret", "TZ=Asia/Shanghai"],
             "User": "1000:1000",
@@ -54,6 +57,7 @@ def current_container() -> dict[str, Any]:
                 "org.opencontainers.image.source": OFFICIAL_SOURCE,
                 "org.opencontainers.image.title": "MediaSync",
                 "org.opencontainers.image.revision": "old-revision",
+                "org.opencontainers.image.version": "v0.2.0-rc.9",
                 "user.label": "keep",
             },
         },
@@ -187,6 +191,10 @@ async def test_prepare_writes_private_intent_and_creates_restricted_updater(
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     intent = json.loads(path.read_text(encoding="utf-8"))
     assert intent["target_image"] == f"josephyjq/mediasync@{DIGEST}"
+    assert intent["source_image_id"] == SOURCE_IMAGE_ID
+    assert intent["source_image_reference"] == "josephyjq/mediasync:v0.2.0-rc.9"
+    assert intent["source_version"] == "v0.2.0-rc.9"
+    assert intent["source_digest"] is None
     assert intent["candidate"]["env"][0] == "ADMIN_PASSWORD=secret"
     name, config = creator.calls[0]
     assert name == "mediasync-updater-fixednonce"
