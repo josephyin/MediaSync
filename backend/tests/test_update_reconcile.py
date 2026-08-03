@@ -187,12 +187,17 @@ def test_cleanup_failure_keeps_gate_closed_and_retry_is_idempotent(
     assert not (operations / f"{OPERATION_ID}.candidate.json").exists()
 
 
-def test_rolled_back_result_releases_gate_without_candidate_evidence(
+@pytest.mark.parametrize(
+    "operation_status",
+    ["handoff", "snapshotting", "switching", "verifying", "rolling_back"],
+)
+def test_rolled_back_result_converges_restored_state_and_releases_gate(
     tmp_path: Path,
+    operation_status: str,
 ) -> None:
     factory, pending, _operations = prepare_runtime(
         tmp_path,
-        operation_status="rolling_back",
+        operation_status=operation_status,
         result_status="rolled_back",
     )
 
@@ -205,6 +210,51 @@ def test_rolled_back_result_releases_gate_without_candidate_evidence(
     with factory() as session:
         operation = UpdateOperationRepository(session).get_by_operation_id(OPERATION_ID)
         assert operation is not None and operation.status == "rolled_back"
+
+
+@pytest.mark.parametrize("operation_status", ["checking", "available", "pulling", "draining"])
+def test_rolled_back_result_rejects_states_before_handoff(
+    tmp_path: Path,
+    operation_status: str,
+) -> None:
+    factory, pending, _operations = prepare_runtime(
+        tmp_path,
+        operation_status=operation_status,
+        result_status="rolled_back",
+    )
+
+    with pytest.raises(UpdateReconciliationError, match="回滚终态"):
+        UpdateTerminalReconciler(
+            session_factory=factory,
+            data_directory=tmp_path,
+            pending_path=pending,
+        ).reconcile()
+
+    with factory() as session:
+        operation = UpdateOperationRepository(session).get_active()
+        assert operation is not None and operation.status == operation_status
+
+
+def test_rolled_back_result_rejects_mismatched_target(tmp_path: Path) -> None:
+    factory, pending, _operations = prepare_runtime(
+        tmp_path,
+        operation_status="snapshotting",
+        result_status="rolled_back",
+    )
+    payload = json.loads(pending.read_text(encoding="utf-8"))
+    payload["target_digest"] = f"sha256:{'c' * 64}"
+    pending.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(UpdateReconciliationError, match="更新目标"):
+        UpdateTerminalReconciler(
+            session_factory=factory,
+            data_directory=tmp_path,
+            pending_path=pending,
+        ).reconcile()
+
+    with factory() as session:
+        operation = UpdateOperationRepository(session).get_active()
+        assert operation is not None and operation.status == "snapshotting"
 
 
 def test_rollback_failed_preserves_active_operation_and_manual_gate(

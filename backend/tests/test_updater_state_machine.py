@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -23,6 +24,7 @@ from app.services.updater_handoff_service import (
 from app.services.updater_state_machine import (
     ApplianceCommitWaiter,
     CandidateHealthVerifier,
+    PreviousContainerHealthVerifier,
     UpdaterStateMachine,
     UpdaterStateMachineError,
 )
@@ -79,10 +81,23 @@ def write_handoff(tmp_path: Path) -> HandoffDocument:
 
 
 class FakeEngine:
-    def __init__(self, events: list[str], *, restart_policy_fails: bool = False) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        restart_policy_fails: bool = False,
+        fail_at: str | None = None,
+    ) -> None:
         self.events = events
         self.removed: list[str] = []
         self.restart_policy_fails = restart_policy_fails
+        self.fail_at = fail_at
+
+    def maybe_fail(self, step: str) -> None:
+        if self.fail_at == step:
+            from app.services.docker_capability_service import DockerEngineError
+
+            raise DockerEngineError(f"{step} failed")
 
     async def update_restart_policy(
         self,
@@ -98,6 +113,7 @@ class FakeEngine:
 
     async def stop_container(self, container_id: str, *, timeout_seconds: int) -> None:
         self.events.append(f"stop:{container_id}:{timeout_seconds}")
+        self.maybe_fail("stop_candidate" if container_id == CANDIDATE_ID else "stop_old")
 
     async def wait_container(self, container_id: str) -> int:
         self.events.append(f"wait:{container_id}")
@@ -105,14 +121,19 @@ class FakeEngine:
 
     async def rename_container(self, container_id: str, *, name: str) -> None:
         self.events.append(f"rename:{container_id}:{name}")
+        self.maybe_fail("rename_restore" if name == "MediaSync" else "rename_previous")
 
     async def create_container(self, *, name: str, config: dict[str, Any]) -> str:
         assert config["Image"] == f"josephyjq/mediasync@{TARGET_DIGEST}"
         self.events.append(f"create:{name}")
+        self.maybe_fail("create_candidate")
         return CANDIDATE_ID
 
     async def start_container(self, container_id: str) -> None:
         self.events.append(f"start:{container_id}")
+        self.maybe_fail(
+            "start_candidate" if container_id == CANDIDATE_ID else "start_previous"
+        )
 
     async def remove_container(self, container_id: str) -> None:
         self.events.append(f"remove:{container_id}")
@@ -126,27 +147,43 @@ class FakeEngine:
 
 
 class FakeSnapshotService:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], *, create_fails: bool = False) -> None:
         self.events = events
+        self.create_fails = create_fails
 
     def create(self, *, operation_id: str, handoff_path: Path) -> Path:
         assert handoff_path.name == f"{operation_id}.handoff.json"
         self.events.append("snapshot:create")
+        if self.create_fails:
+            from app.services.update_snapshot_service import UpdateSnapshotError
+
+            raise UpdateSnapshotError("snapshot failed")
         return Path("snapshot")
 
     def verify(self, *, operation_id: str):
         self.events.append(f"snapshot:verify:{operation_id}")
         return Path("snapshot"), object()
 
+    def restore(self, *, operation_id: str):
+        self.events.append(f"snapshot:restore:{operation_id}")
+        return object()
+
 
 class FakeJournal:
     def __init__(self, events: list[str]) -> None:
         self.events = events
+        self.status: str | None = None
 
     def start(self, *, operation_id: str) -> None:
+        self.status = "snapshotting"
         self.events.append(f"journal:snapshotting:{operation_id}")
 
-    def transition(self, *, operation_id: str, status: str) -> None:
+    def read(self, *, operation_id: str):
+        assert self.status is not None
+        return SimpleNamespace(operation_id=operation_id, status=self.status)
+
+    def transition(self, *, operation_id: str, status: str, **_kwargs) -> None:
+        self.status = status
         self.events.append(f"journal:{status}:{operation_id}")
 
 
@@ -172,27 +209,52 @@ class FakeCommitWaiter:
             raise UpdaterStateMachineError("等待 Appliance 提交更新终态超时")
 
 
+class FakePreviousVerifier:
+    def __init__(self, events: list[str], *, fail: bool = False) -> None:
+        self.events = events
+        self.fail = fail
+
+    async def verify(self, _document, container_id: str) -> None:
+        self.events.append(f"verify-previous:{container_id}")
+        if self.fail:
+            raise UpdaterStateMachineError("previous failed")
+
+
 def state_machine(
     tmp_path: Path,
     *,
     verifier_fails: bool = False,
     commit_fails: bool = False,
     restart_policy_fails: bool = False,
+    snapshot_fails: bool = False,
+    previous_verifier_fails: bool = False,
+    engine_fails_at: str | None = None,
 ) -> tuple[UpdaterStateMachine, FakeEngine, list[str]]:
     write_handoff(tmp_path)
     events: list[str] = []
-    engine = FakeEngine(events, restart_policy_fails=restart_policy_fails)
+    engine = FakeEngine(
+        events,
+        restart_policy_fails=restart_policy_fails,
+        fail_at=engine_fails_at,
+    )
     return (
         UpdaterStateMachine(
             engine=engine,
             data_directory=tmp_path,
-            snapshot_service=FakeSnapshotService(events),  # type: ignore[arg-type]
+            snapshot_service=FakeSnapshotService(  # type: ignore[arg-type]
+                events,
+                create_fails=snapshot_fails,
+            ),
             candidate_service=UpdaterCandidateService(
                 pending_path=tmp_path / "update" / "pending.json",
                 token_factory=lambda: CANDIDATE_TOKEN,
             ),
             journal=FakeJournal(events),  # type: ignore[arg-type]
             verifier=FakeVerifier(events, fail=verifier_fails),
+            previous_verifier=FakePreviousVerifier(
+                events,
+                fail=previous_verifier_fails,
+            ),
             commit_waiter=FakeCommitWaiter(events, fail=commit_fails),
         ),
         engine,
@@ -231,14 +293,122 @@ async def test_normal_path_removes_old_container_only_after_success_commit(
 
 
 @pytest.mark.asyncio
-async def test_candidate_failure_never_deletes_old_container(tmp_path: Path) -> None:
+async def test_candidate_failure_rolls_back_without_deleting_old_container(
+    tmp_path: Path,
+) -> None:
     machine, engine, events = state_machine(tmp_path, verifier_fails=True)
+    evidence = (
+        tmp_path / "update" / "operations" / f"{OPERATION_ID}.candidate.json"
+    )
+    evidence.write_text("stale", encoding="utf-8")
 
-    with pytest.raises(UpdaterStateMachineError, match="candidate failed"):
+    with pytest.raises(UpdaterStateMachineError, match="已自动回滚"):
         await machine.execute(operation_id=OPERATION_ID)
 
-    assert engine.removed == []
+    assert engine.removed == [CANDIDATE_ID]
+    assert OLD_CONTAINER_ID not in engine.removed
+    assert f"snapshot:restore:{OPERATION_ID}" in events
+    assert f"verify-previous:{OLD_CONTAINER_ID}" in events
+    assert f"journal:rolled_back:{OPERATION_ID}" in events
     assert not any(event.startswith("journal:success") for event in events)
+    assert not evidence.exists()
+    assert (tmp_path / "update" / "pending.json").exists()
+    assert (
+        tmp_path / "update" / "operations" / f"{OPERATION_ID}.handoff.json"
+    ).exists()
+    ordered = [
+        f"stop:{CANDIDATE_ID}:90",
+        f"remove:{CANDIDATE_ID}",
+        f"snapshot:restore:{OPERATION_ID}",
+        f"rename:{OLD_CONTAINER_ID}:MediaSync",
+        f"restart-policy:{OLD_CONTAINER_ID}:unless-stopped",
+        f"start:{OLD_CONTAINER_ID}",
+        f"verify-previous:{OLD_CONTAINER_ID}",
+        f"journal:rolled_back:{OPERATION_ID}",
+    ]
+    assert [events.index(item) for item in ordered] == sorted(
+        events.index(item) for item in ordered
+    )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_failure_restarts_old_without_restoring_incomplete_snapshot(
+    tmp_path: Path,
+) -> None:
+    machine, engine, events = state_machine(tmp_path, snapshot_fails=True)
+
+    with pytest.raises(UpdaterStateMachineError, match="已自动回滚"):
+        await machine.execute(operation_id=OPERATION_ID)
+
+    assert not any(event.startswith("snapshot:restore") for event in events)
+    assert f"restart-policy:{OLD_CONTAINER_ID}:unless-stopped" in events
+    assert f"start:{OLD_CONTAINER_ID}" in events
+    assert f"journal:rolled_back:{OPERATION_ID}" in events
+    assert engine.removed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "engine_fails_at",
+    ["rename_previous", "create_candidate", "start_candidate"],
+)
+async def test_switch_failures_restore_previous_container(
+    tmp_path: Path,
+    engine_fails_at: str,
+) -> None:
+    machine, engine, events = state_machine(
+        tmp_path,
+        engine_fails_at=engine_fails_at,
+    )
+
+    with pytest.raises(UpdaterStateMachineError, match="已自动回滚"):
+        await machine.execute(operation_id=OPERATION_ID)
+
+    assert f"snapshot:restore:{OPERATION_ID}" in events
+    assert f"start:{OLD_CONTAINER_ID}" in events
+    assert f"verify-previous:{OLD_CONTAINER_ID}" in events
+    assert f"journal:rolled_back:{OPERATION_ID}" in events
+    assert OLD_CONTAINER_ID not in engine.removed
+
+
+@pytest.mark.asyncio
+async def test_candidate_stop_failure_does_not_restore_snapshot_or_start_old(
+    tmp_path: Path,
+) -> None:
+    machine, _engine, events = state_machine(
+        tmp_path,
+        verifier_fails=True,
+        engine_fails_at="stop_candidate",
+    )
+
+    with pytest.raises(UpdaterStateMachineError, match="自动回滚失败"):
+        await machine.execute(operation_id=OPERATION_ID)
+
+    assert not any(event.startswith("snapshot:restore") for event in events)
+    assert f"start:{OLD_CONTAINER_ID}" not in events
+    assert f"journal:rollback_failed:{OPERATION_ID}" in events
+
+
+@pytest.mark.asyncio
+async def test_failed_previous_health_enters_manual_recovery_terminal(
+    tmp_path: Path,
+) -> None:
+    machine, engine, events = state_machine(
+        tmp_path,
+        verifier_fails=True,
+        previous_verifier_fails=True,
+    )
+
+    with pytest.raises(UpdaterStateMachineError, match="自动回滚失败"):
+        await machine.execute(operation_id=OPERATION_ID)
+
+    assert f"journal:rollback_failed:{OPERATION_ID}" in events
+    assert f"journal:rolled_back:{OPERATION_ID}" not in events
+    assert OLD_CONTAINER_ID not in engine.removed
+    assert (tmp_path / "update" / "pending.json").exists()
+    assert (
+        tmp_path / "update" / "operations" / f"{OPERATION_ID}.handoff.json"
+    ).exists()
 
 
 @pytest.mark.asyncio
@@ -247,7 +417,7 @@ async def test_commit_timeout_keeps_candidate_and_previous_container(
 ) -> None:
     machine, engine, events = state_machine(tmp_path, commit_fails=True)
 
-    with pytest.raises(UpdaterStateMachineError, match="终态超时"):
+    with pytest.raises(UpdaterStateMachineError, match="等待提交确认"):
         await machine.execute(operation_id=OPERATION_ID)
 
     assert f"journal:commit_requested:{OPERATION_ID}" in events
@@ -316,6 +486,42 @@ class VerificationEngine:
             },
         }
 
+
+class PreviousVerificationEngine:
+    def __init__(
+        self,
+        *,
+        restart_counts: list[int] | None = None,
+        components: dict[str, bool] | None = None,
+    ) -> None:
+        self.restart_counts = iter(restart_counts or [0])
+        self.last_restart_count = 0
+        self.components = components or {
+            "launcher": True,
+            "nginx": True,
+            "api": True,
+            "scheduler": True,
+            "worker": True,
+        }
+
+    async def inspect_container(self, container_id: str) -> dict[str, Any]:
+        import json
+
+        self.last_restart_count = next(self.restart_counts, self.last_restart_count)
+        return {
+            "Id": container_id,
+            "Name": "/MediaSync",
+            "Image": SOURCE_IMAGE_ID,
+            "RestartCount": self.last_restart_count,
+            "State": {
+                "Running": True,
+                "StartedAt": "2026-08-03T01:00:00Z",
+                "Health": {
+                    "Status": "healthy",
+                    "Log": [{"Output": json.dumps(self.components)}],
+                },
+            },
+        }
 
 def prepare_verification(
     tmp_path: Path,
@@ -419,6 +625,50 @@ async def test_evidence_older_than_current_candidate_start_is_rejected(
 
     with pytest.raises(UpdaterStateMachineError, match="当前容器不匹配"):
         await verifier.verify(document, preparation, CANDIDATE_ID)
+
+
+@pytest.mark.asyncio
+async def test_previous_verifier_requires_stable_identity_and_five_components(
+    tmp_path: Path,
+) -> None:
+    document = write_handoff(tmp_path)
+    clock = FakeClock()
+    verifier = PreviousContainerHealthVerifier(
+        engine=PreviousVerificationEngine(),  # type: ignore[arg-type]
+        stable_seconds=2,
+        timeout_seconds=5,
+        poll_seconds=1,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    await verifier.verify(document, OLD_CONTAINER_ID)
+
+    assert clock.value == 2
+
+
+@pytest.mark.asyncio
+async def test_previous_verifier_rejects_incomplete_component_health(
+    tmp_path: Path,
+) -> None:
+    document = write_handoff(tmp_path)
+    verifier = PreviousContainerHealthVerifier(
+        engine=PreviousVerificationEngine(  # type: ignore[arg-type]
+            components={
+                "launcher": True,
+                "nginx": True,
+                "api": True,
+                "scheduler": True,
+                "worker": False,
+            }
+        ),
+        stable_seconds=1,
+        timeout_seconds=2,
+        poll_seconds=1,
+    )
+
+    with pytest.raises(UpdaterStateMachineError, match="五组件未全部健康"):
+        await verifier.verify(document, OLD_CONTAINER_ID)
 
 
 @pytest.mark.asyncio
