@@ -389,17 +389,21 @@ def _valid_candidate(
     result: UpdaterResultV2,
     marker: PendingUpdateMarker | None,
 ) -> bool:
-    if marker is None or marker.operation_id != result.operation_id:
+    token = _environment(container).get("MEDIASYNC_CANDIDATE_TOKEN")
+    if not isinstance(token, str):
         return False
-    expected_hash = "sha256:" + hashlib.sha256(marker.candidate_token.encode()).hexdigest()
+    if marker is not None and (
+        marker.operation_id != result.operation_id
+        or marker.candidate_token != token
+    ):
+        return False
+    expected_hash = "sha256:" + hashlib.sha256(token.encode()).hexdigest()
     if result.candidate_token_hash != expected_hash:
         return False
     return (
         _name(container) == result.source_container_name
         and _config(container).get("Image") == result.target_image == document.target_image
         and _config(container).get("Cmd") == APPLIANCE_COMMAND
-        and _environment(container).get("MEDIASYNC_CANDIDATE_TOKEN")
-        == marker.candidate_token
         and _mount_matches(container, document=document, target="/data")
     )
 
