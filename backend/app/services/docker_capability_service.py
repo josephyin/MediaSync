@@ -55,6 +55,7 @@ class DockerEngineClient:
         path: str,
         *,
         params: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
         timeout_seconds: float | None = None,
     ) -> httpx.Response:
         transport = self.transport or httpx.AsyncHTTPTransport(uds=self.socket_path)
@@ -64,7 +65,7 @@ class DockerEngineClient:
                 base_url="http://docker",
                 timeout=timeout_seconds or self.timeout_seconds,
             ) as client:
-                return await client.request(method, path, params=params)
+                return await client.request(method, path, params=params, json=json)
         except httpx.HTTPError as exc:
             raise DockerEngineError("Docker Engine API 不可访问") from exc
 
@@ -141,6 +142,31 @@ class DockerEngineClient:
                 raise DockerEngineError("Docker Engine 返回无效拉取结果")
             if event.get("error") or event.get("errorDetail"):
                 raise DockerEngineError("目标镜像拉取失败")
+
+    async def create_container(
+        self,
+        *,
+        name: str,
+        config: dict[str, Any],
+    ) -> str:
+        response = await self._request(
+            "POST",
+            "/containers/create",
+            params={"name": name},
+            json=config,
+        )
+        if response.status_code != 201:
+            raise DockerEngineError("无法创建 updater 助手容器")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise DockerEngineError("Docker Engine 返回无效创建结果") from exc
+        container_id = payload.get("Id") if isinstance(payload, dict) else None
+        if not isinstance(container_id, str) or not CONTAINER_ID_PATTERN.fullmatch(
+            container_id
+        ):
+            raise DockerEngineError("Docker Engine 返回无效容器标识")
+        return container_id
 
 
 SocketProbe = Callable[[str], str]
