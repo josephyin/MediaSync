@@ -90,6 +90,7 @@ schema v2 记录最新可恢复状态：
   "status": "switching",
   "checkpoint": "candidate_started",
   "recovery_generation": 1,
+  "coordinator_container_id": "64-char-id",
   "source_container_id": "64-char-id",
   "source_image_id": "sha256:...",
   "source_container_name": "MediaSync",
@@ -104,7 +105,8 @@ schema v2 记录最新可恢复状态：
 }
 ```
 
-`recovery_generation` 在新进程取得独占锁并接管非终态操作时递增，只用于审计和拒绝旧
+`recovery_generation` 在新进程取得独占锁并接管非终态操作时递增，并同时记录经过
+Docker inspect 严格确认的完整 `coordinator_container_id`。两者用于审计和拒绝旧
 内存对象；真正的进程互斥由 `flock` 保证。
 
 源容器 ID、源镜像 ID、原始名称、目标不可变镜像和目标 revision 在 schema v2 创建后
@@ -252,6 +254,10 @@ schema v1 不重写为伪造的 v2 历史：
 
 项目在生产入口开放前不会产生真实 schema v1 更新操作，因此该策略优先失败关闭，
 不为未发布行为增加猜测性兼容。
+
+schema v1 候选没有 v2 role 标签。仅在 v1 `COMMIT_REQUESTED` 兼容路径中，允许使用
+handoff、pending token、原始名称、不可变镜像和 `/data` 挂载共同得到的唯一候选；
+该例外不得用于 schema v2。
 
 ## 8. 故障注入验收
 

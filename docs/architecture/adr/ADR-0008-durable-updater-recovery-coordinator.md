@@ -34,6 +34,7 @@ updater 结果协议升级为 schema v2，在原有业务状态之外持久化�
 - 单调递增的 `sequence`；
 - 当前 `checkpoint`；
 - 恢复代次 `recovery_generation`；
+- 当前 `coordinator_container_id`；
 - 源容器、源镜像和目标镜像的不可变身份；
 - 已创建的 `candidate_container_id`；
 - 回滚是否已经开始；
