@@ -21,7 +21,7 @@ from app.services.update_snapshot_service import (
 )
 
 logger = logging.getLogger(__name__)
-TERMINAL_RECONCILABLE_RESULTS = frozenset({"success", "rolled_back"})
+RECONCILABLE_RESULTS = frozenset({"commit_requested", "success", "rolled_back"})
 
 
 class UpdateReconciliationError(RuntimeError):
@@ -36,14 +36,14 @@ class UpdateTerminalReconciler:
         data_directory: Path,
         pending_path: Path,
         unlink: Callable[[Path], None] | None = None,
-        allow_active_success: bool = False,
+        allow_active_commit: bool = False,
     ) -> None:
         self._session_factory = session_factory
         self._data_directory = Path(data_directory)
         self._pending_path = Path(pending_path)
         self._operations_directory = self._data_directory / "update" / "operations"
         self._unlink = unlink or (lambda path: path.unlink(missing_ok=True))
-        self._allow_active_success = allow_active_success
+        self._allow_active_commit = allow_active_commit
 
     def reconcile(self) -> bool:
         self._validate_directories()
@@ -69,9 +69,14 @@ class UpdateTerminalReconciler:
                 raise UpdateReconciliationError("终态结果对应的更新操作不存在")
 
             if operation.active_slot is None:
-                if operation.status not in TERMINAL_RECONCILABLE_RESULTS:
+                if operation.status not in {"success", "rolled_back"}:
                     raise UpdateReconciliationError("更新操作已经以其他终态结束")
-                if operation.status != result.status:
+                expected_results = (
+                    {"commit_requested", "success"}
+                    if operation.status == "success"
+                    else {"rolled_back"}
+                )
+                if result.status not in expected_results:
                     raise UpdateReconciliationError("数据库终态与 updater 结果不一致")
             elif result.status == "rollback_failed":
                 logger.error(
@@ -79,13 +84,20 @@ class UpdateTerminalReconciler:
                     marker.operation_id,
                 )
                 return False
-            elif result.status in TERMINAL_RECONCILABLE_RESULTS:
-                if result.status == "success" and not self._allow_active_success:
+            elif result.status in RECONCILABLE_RESULTS:
+                if result.status == "success":
+                    raise UpdateReconciliationError("活动更新不能直接接受 SUCCESS 结果")
+                if result.status == "commit_requested" and not self._allow_active_commit:
                     return False
-                expected_source = "verifying" if result.status == "success" else "rolling_back"
+                expected_source = (
+                    "verifying" if result.status == "commit_requested" else "rolling_back"
+                )
                 if operation.status != expected_source:
                     raise UpdateReconciliationError("updater 终态与活动更新状态不匹配")
-                if result.status == "success":
+                terminal_status = (
+                    "success" if result.status == "commit_requested" else result.status
+                )
+                if result.status == "commit_requested":
                     self._validate_success_evidence(
                         marker,
                         operation.target_version,
@@ -93,7 +105,7 @@ class UpdateTerminalReconciler:
                     )
                 repository.finish(
                     operation,
-                    status=result.status,
+                    status=terminal_status,
                     completed_at=result.updated_at,
                     error_code=result.error_code,
                     error_message=result.public_error_message,

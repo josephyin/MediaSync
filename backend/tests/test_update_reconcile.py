@@ -98,13 +98,13 @@ def write_candidate_evidence(tmp_path: Path, pending: Path) -> None:
     ).observe(COMPONENTS)
 
 
-def test_success_result_commits_terminal_state_then_cleans_runtime_markers(
+def test_commit_requested_result_commits_terminal_state_then_cleans_runtime_markers(
     tmp_path: Path,
 ) -> None:
     factory, pending, operations = prepare_runtime(
         tmp_path,
         operation_status="verifying",
-        result_status="success",
+        result_status="commit_requested",
     )
     write_candidate_evidence(tmp_path, pending)
 
@@ -112,7 +112,7 @@ def test_success_result_commits_terminal_state_then_cleans_runtime_markers(
         session_factory=factory,
         data_directory=tmp_path,
         pending_path=pending,
-        allow_active_success=True,
+        allow_active_commit=True,
     ).reconcile()
 
     with factory() as session:
@@ -127,13 +127,13 @@ def test_success_result_commits_terminal_state_then_cleans_runtime_markers(
     assert (operations / f"{OPERATION_ID}.json").exists()
 
 
-def test_startup_reconciliation_defers_active_success_until_current_health_observation(
+def test_startup_reconciliation_defers_active_commit_until_current_health_observation(
     tmp_path: Path,
 ) -> None:
     factory, pending, _operations = prepare_runtime(
         tmp_path,
         operation_status="verifying",
-        result_status="success",
+        result_status="commit_requested",
     )
     write_candidate_evidence(tmp_path, pending)
 
@@ -155,7 +155,7 @@ def test_cleanup_failure_keeps_gate_closed_and_retry_is_idempotent(
     factory, pending, operations = prepare_runtime(
         tmp_path,
         operation_status="verifying",
-        result_status="success",
+        result_status="commit_requested",
     )
     write_candidate_evidence(tmp_path, pending)
 
@@ -170,7 +170,7 @@ def test_cleanup_failure_keeps_gate_closed_and_retry_is_idempotent(
             data_directory=tmp_path,
             pending_path=pending,
             unlink=fail_first_cleanup,
-            allow_active_success=True,
+            allow_active_commit=True,
         ).reconcile()
 
     with factory() as session:

@@ -300,7 +300,7 @@ class ApplianceLauncher:
                     ),
                     data_directory=self._data_directory,
                     pending_path=self._data_directory / "update" / "pending.json",
-                    allow_active_success=True,
+                    allow_active_commit=True,
                 )
             self._run_startup_barriers(environment)
             self._start(API, environment)

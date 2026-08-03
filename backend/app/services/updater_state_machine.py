@@ -48,6 +48,13 @@ class UpdaterStateMachineError(RuntimeError):
 
 
 class UpdaterEngine(Protocol):
+    async def update_restart_policy(
+        self,
+        container_id: str,
+        *,
+        restart_policy: dict[str, Any],
+    ) -> None: ...
+
     async def stop_container(self, container_id: str, *, timeout_seconds: int) -> None: ...
 
     async def wait_container(self, container_id: str) -> int: ...
@@ -326,6 +333,11 @@ class UpdaterStateMachine:
             )
             phase = "初始化结果日志"
             self._journal.start(operation_id=operation_id)
+            phase = "隔离旧容器重启策略"
+            await self._engine.update_restart_policy(
+                document.current_container_id,
+                restart_policy={"Name": "no", "MaximumRetryCount": 0},
+            )
             phase = "停止旧容器"
             await self._engine.stop_container(
                 document.current_container_id,
@@ -354,9 +366,13 @@ class UpdaterStateMachine:
             self._journal.transition(operation_id=operation_id, status="verifying")
             phase = "验证候选容器"
             await self._verifier.verify(document, preparation, candidate_id)
-            self._journal.transition(operation_id=operation_id, status="success")
-            phase = "等待终态对账"
+            self._journal.transition(
+                operation_id=operation_id,
+                status="commit_requested",
+            )
+            phase = "等待提交确认"
             await self._commit_waiter.wait(operation_id=operation_id)
+            self._journal.transition(operation_id=operation_id, status="success")
             phase = "清理旧容器"
             await self._engine.remove_container(document.current_container_id)
             return candidate_id
