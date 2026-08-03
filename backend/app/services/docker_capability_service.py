@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 OFFICIAL_SOURCE = "https://github.com/josephyin/MediaSync"
 APPLIANCE_COMMAND = ["python", "-m", "app.appliance"]
 CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
+DOCKER_RESOURCE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
 
 
@@ -149,6 +150,7 @@ class DockerEngineClient:
         name: str,
         config: dict[str, Any],
     ) -> str:
+        validate_docker_resource_name(name, resource="容器名称")
         response = await self._request(
             "POST",
             "/containers/create",
@@ -167,6 +169,123 @@ class DockerEngineClient:
         ):
             raise DockerEngineError("Docker Engine 返回无效容器标识")
         return container_id
+
+    async def start_container(self, container_id: str) -> None:
+        validate_container_id(container_id)
+        response = await self._request("POST", f"/containers/{container_id}/start")
+        if response.status_code not in {204, 304}:
+            raise DockerEngineError("无法启动容器")
+
+    async def stop_container(
+        self,
+        container_id: str,
+        *,
+        timeout_seconds: int,
+    ) -> None:
+        validate_container_id(container_id)
+        if not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 600:
+            raise DockerEngineError("容器停止超时时间无效")
+        response = await self._request(
+            "POST",
+            f"/containers/{container_id}/stop",
+            params={"t": str(timeout_seconds)},
+            timeout_seconds=timeout_seconds + self.timeout_seconds,
+        )
+        if response.status_code not in {204, 304}:
+            raise DockerEngineError("无法停止容器")
+
+    async def wait_container(self, container_id: str) -> int:
+        validate_container_id(container_id)
+        response = await self._request(
+            "POST",
+            f"/containers/{container_id}/wait",
+            params={"condition": "not-running"},
+            timeout_seconds=600,
+        )
+        if response.status_code != 200:
+            raise DockerEngineError("无法等待容器停止")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise DockerEngineError("Docker Engine 返回无效容器退出结果") from exc
+        status_code = payload.get("StatusCode") if isinstance(payload, dict) else None
+        if not isinstance(status_code, int) or isinstance(status_code, bool) or status_code < 0:
+            raise DockerEngineError("Docker Engine 返回无效容器退出结果")
+        error = payload.get("Error")
+        if error is not None and error != {}:
+            raise DockerEngineError("容器停止结果包含错误")
+        return status_code
+
+    async def rename_container(self, container_id: str, *, name: str) -> None:
+        validate_container_id(container_id)
+        validate_docker_resource_name(name, resource="容器名称")
+        response = await self._request(
+            "POST",
+            f"/containers/{container_id}/rename",
+            params={"name": name},
+        )
+        if response.status_code != 204:
+            raise DockerEngineError("无法重命名容器")
+
+    async def remove_container(self, container_id: str) -> None:
+        validate_container_id(container_id)
+        response = await self._request(
+            "DELETE",
+            f"/containers/{container_id}",
+            params={"v": "0"},
+        )
+        if response.status_code not in {204, 404}:
+            raise DockerEngineError("无法删除已停止容器")
+
+    async def connect_network(
+        self,
+        network: str,
+        *,
+        container_id: str,
+        aliases: tuple[str, ...] = (),
+    ) -> None:
+        validate_container_id(container_id)
+        validate_docker_resource_name(network, resource="网络标识")
+        for alias in aliases:
+            validate_docker_resource_name(alias, resource="网络别名")
+        response = await self._request(
+            "POST",
+            f"/networks/{quote(network, safe='')}/connect",
+            json={
+                "Container": container_id,
+                "EndpointConfig": {"Aliases": list(aliases)},
+            },
+        )
+        if response.status_code != 200:
+            raise DockerEngineError("无法连接容器网络")
+
+    async def disconnect_network(
+        self,
+        network: str,
+        *,
+        container_id: str,
+    ) -> None:
+        validate_container_id(container_id)
+        validate_docker_resource_name(network, resource="网络标识")
+        response = await self._request(
+            "POST",
+            f"/networks/{quote(network, safe='')}/disconnect",
+            json={"Container": container_id, "Force": False},
+        )
+        if response.status_code not in {200, 404}:
+            raise DockerEngineError("无法断开容器网络")
+
+
+def validate_container_id(container_id: str) -> None:
+    if not isinstance(container_id, str) or not CONTAINER_ID_PATTERN.fullmatch(
+        container_id
+    ):
+        raise DockerEngineError("容器标识格式无效")
+
+
+def validate_docker_resource_name(value: str, *, resource: str) -> None:
+    if not isinstance(value, str) or not DOCKER_RESOURCE_NAME_PATTERN.fullmatch(value):
+        raise DockerEngineError(f"{resource}格式无效")
 
 
 SocketProbe = Callable[[str], str]
