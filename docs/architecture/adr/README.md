@@ -97,3 +97,4 @@ ADR-0002-task-execution-model.md
 | [ADR-0004](ADR-0004-single-container-appliance.md) | 默认单容器 Appliance，保留多进程职责边界 | 已接受 |
 | [ADR-0005](ADR-0005-optional-docker-socket-updater.md) | Docker Socket 可选一键镜像升级 | 已接受 |
 | [ADR-0006](ADR-0006-updater-two-phase-commit.md) | Updater 两阶段提交与重启策略 Fencing | 已接受 |
+| [ADR-0007](ADR-0007-updater-rollback-reconciliation.md) | Updater 回滚由旧 Appliance 提交终态 | 提议中 |
