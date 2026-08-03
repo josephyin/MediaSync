@@ -245,13 +245,29 @@ def test_result_journal_enforces_state_order_and_terminal_immutability(
 
     second = journal.transition(operation_id=OPERATION_ID, status="switching")
     journal.transition(operation_id=OPERATION_ID, status="verifying")
+    requested = journal.transition(
+        operation_id=OPERATION_ID,
+        status="commit_requested",
+    )
     terminal = journal.transition(operation_id=OPERATION_ID, status="success")
 
     assert second.sequence == 2
-    assert terminal.sequence == 4
+    assert requested.sequence == 4
+    assert terminal.sequence == 5
     assert stat.S_IMODE((tmp_path / "operations").stat().st_mode) == 0o700
     assert stat.S_IMODE(
         (tmp_path / "operations" / f"{OPERATION_ID}.json").stat().st_mode
     ) == 0o600
     with pytest.raises(UpdateSnapshotError, match="终态结果不可修改"):
+        journal.transition(operation_id=OPERATION_ID, status="rolling_back")
+
+
+def test_commit_requested_cannot_transition_to_rollback(tmp_path: Path) -> None:
+    journal = UpdaterResultJournal(directory=str(tmp_path / "operations"))
+    journal.start(operation_id=OPERATION_ID)
+    journal.transition(operation_id=OPERATION_ID, status="switching")
+    journal.transition(operation_id=OPERATION_ID, status="verifying")
+    journal.transition(operation_id=OPERATION_ID, status="commit_requested")
+
+    with pytest.raises(UpdateSnapshotError, match="状态转换无效"):
         journal.transition(operation_id=OPERATION_ID, status="rolling_back")

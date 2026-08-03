@@ -24,6 +24,9 @@ APPLIANCE_COMMAND = ["python", "-m", "app.appliance"]
 CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
 DOCKER_RESOURCE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+ALLOWED_RESTART_POLICIES = frozenset(
+    {"", "no", "always", "unless-stopped", "on-failure"}
+)
 
 
 class DockerEngineError(RuntimeError):
@@ -193,6 +196,38 @@ class DockerEngineClient:
         )
         if response.status_code not in {204, 304}:
             raise DockerEngineError("无法停止容器")
+
+    async def update_restart_policy(
+        self,
+        container_id: str,
+        *,
+        restart_policy: dict[str, Any],
+    ) -> None:
+        validate_container_id(container_id)
+        if set(restart_policy) != {"Name", "MaximumRetryCount"}:
+            raise DockerEngineError("容器重启策略格式无效")
+        name = restart_policy.get("Name")
+        maximum_retry_count = restart_policy.get("MaximumRetryCount")
+        if (
+            not isinstance(name, str)
+            or name not in ALLOWED_RESTART_POLICIES
+            or not isinstance(maximum_retry_count, int)
+            or isinstance(maximum_retry_count, bool)
+            or maximum_retry_count < 0
+        ):
+            raise DockerEngineError("容器重启策略格式无效")
+        response = await self._request(
+            "POST",
+            f"/containers/{container_id}/update",
+            json={
+                "RestartPolicy": {
+                    "Name": name,
+                    "MaximumRetryCount": maximum_retry_count,
+                }
+            },
+        )
+        if response.status_code != 200:
+            raise DockerEngineError("无法更新容器重启策略")
 
     async def wait_container(self, container_id: str) -> int:
         validate_container_id(container_id)

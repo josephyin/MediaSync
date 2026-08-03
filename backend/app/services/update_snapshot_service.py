@@ -32,7 +32,8 @@ UPDATER_TERMINAL_STATUSES = frozenset(
 UPDATER_TRANSITIONS = {
     "snapshotting": {"switching", "rolling_back", "failed"},
     "switching": {"verifying", "rolling_back"},
-    "verifying": {"success", "rolling_back"},
+    "verifying": {"commit_requested", "rolling_back"},
+    "commit_requested": {"success"},
     "rolling_back": {"rolled_back", "rollback_failed"},
 }
 
@@ -111,6 +112,7 @@ class UpdaterResult(StrictModel):
         "snapshotting",
         "switching",
         "verifying",
+        "commit_requested",
         "rolling_back",
         "success",
         "failed",

@@ -79,9 +79,22 @@ def write_handoff(tmp_path: Path) -> HandoffDocument:
 
 
 class FakeEngine:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], *, restart_policy_fails: bool = False) -> None:
         self.events = events
         self.removed: list[str] = []
+        self.restart_policy_fails = restart_policy_fails
+
+    async def update_restart_policy(
+        self,
+        container_id: str,
+        *,
+        restart_policy: dict[str, Any],
+    ) -> None:
+        self.events.append(f"restart-policy:{container_id}:{restart_policy['Name']}")
+        if self.restart_policy_fails:
+            from app.services.docker_capability_service import DockerEngineError
+
+            raise DockerEngineError("policy failed")
 
     async def stop_container(self, container_id: str, *, timeout_seconds: int) -> None:
         self.events.append(f"stop:{container_id}:{timeout_seconds}")
@@ -149,21 +162,26 @@ class FakeVerifier:
 
 
 class FakeCommitWaiter:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], *, fail: bool = False) -> None:
         self.events = events
+        self.fail = fail
 
     async def wait(self, *, operation_id: str) -> None:
         self.events.append(f"commit:{operation_id}")
+        if self.fail:
+            raise UpdaterStateMachineError("等待 Appliance 提交更新终态超时")
 
 
 def state_machine(
     tmp_path: Path,
     *,
     verifier_fails: bool = False,
+    commit_fails: bool = False,
+    restart_policy_fails: bool = False,
 ) -> tuple[UpdaterStateMachine, FakeEngine, list[str]]:
     write_handoff(tmp_path)
     events: list[str] = []
-    engine = FakeEngine(events)
+    engine = FakeEngine(events, restart_policy_fails=restart_policy_fails)
     return (
         UpdaterStateMachine(
             engine=engine,
@@ -175,7 +193,7 @@ def state_machine(
             ),
             journal=FakeJournal(events),  # type: ignore[arg-type]
             verifier=FakeVerifier(events, fail=verifier_fails),
-            commit_waiter=FakeCommitWaiter(events),
+            commit_waiter=FakeCommitWaiter(events, fail=commit_fails),
         ),
         engine,
         events,
@@ -193,6 +211,7 @@ async def test_normal_path_removes_old_container_only_after_success_commit(
     assert candidate_id == CANDIDATE_ID
     assert events == [
         f"journal:snapshotting:{OPERATION_ID}",
+        f"restart-policy:{OLD_CONTAINER_ID}:no",
         f"stop:{OLD_CONTAINER_ID}:90",
         f"wait:{OLD_CONTAINER_ID}",
         "snapshot:create",
@@ -203,8 +222,9 @@ async def test_normal_path_removes_old_container_only_after_success_commit(
         f"start:{CANDIDATE_ID}",
         f"journal:verifying:{OPERATION_ID}",
         f"verify:{CANDIDATE_ID}",
-        f"journal:success:{OPERATION_ID}",
+        f"journal:commit_requested:{OPERATION_ID}",
         f"commit:{OPERATION_ID}",
+        f"journal:success:{OPERATION_ID}",
         f"remove:{OLD_CONTAINER_ID}",
     ]
     assert engine.removed == [OLD_CONTAINER_ID]
@@ -219,6 +239,36 @@ async def test_candidate_failure_never_deletes_old_container(tmp_path: Path) -> 
 
     assert engine.removed == []
     assert not any(event.startswith("journal:success") for event in events)
+
+
+@pytest.mark.asyncio
+async def test_commit_timeout_keeps_candidate_and_previous_container(
+    tmp_path: Path,
+) -> None:
+    machine, engine, events = state_machine(tmp_path, commit_fails=True)
+
+    with pytest.raises(UpdaterStateMachineError, match="终态超时"):
+        await machine.execute(operation_id=OPERATION_ID)
+
+    assert f"journal:commit_requested:{OPERATION_ID}" in events
+    assert not any(event.startswith("journal:success") for event in events)
+    assert engine.removed == []
+
+
+@pytest.mark.asyncio
+async def test_restart_policy_fencing_failure_does_not_stop_old_container(
+    tmp_path: Path,
+) -> None:
+    machine, engine, events = state_machine(tmp_path, restart_policy_fails=True)
+
+    with pytest.raises(UpdaterStateMachineError, match="隔离旧容器重启策略"):
+        await machine.execute(operation_id=OPERATION_ID)
+
+    assert events == [
+        f"journal:snapshotting:{OPERATION_ID}",
+        f"restart-policy:{OLD_CONTAINER_ID}:no",
+    ]
+    assert engine.removed == []
 
 
 class FakeClock:

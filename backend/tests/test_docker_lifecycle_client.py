@@ -58,6 +58,26 @@ async def test_already_started_or_stopped_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_restart_policy_update_uses_restricted_payload() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"Warnings": None})
+
+    await client(handler).update_restart_policy(
+        CONTAINER_ID,
+        restart_policy={"Name": "no", "MaximumRetryCount": 0},
+    )
+
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == f"/containers/{CONTAINER_ID}/update"
+    assert json.loads(requests[0].content) == {
+        "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}
+    }
+
+
+@pytest.mark.asyncio
 async def test_rename_and_remove_keep_exact_identity_without_deleting_volumes() -> None:
     requests: list[httpx.Request] = []
 
@@ -121,6 +141,13 @@ async def test_network_operations_use_restricted_payload() -> None:
         (
             lambda engine: engine.rename_container(CONTAINER_ID, name="bad/name"),
             "容器名称格式无效",
+        ),
+        (
+            lambda engine: engine.update_restart_policy(
+                CONTAINER_ID,
+                restart_policy={"Name": "invalid", "MaximumRetryCount": 0},
+            ),
+            "容器重启策略格式无效",
         ),
         (
             lambda engine: engine.connect_network(
