@@ -202,6 +202,8 @@ async def test_prepare_writes_private_intent_and_creates_restricted_updater(
     assert name == "mediasync-updater-fixednonce"
     assert config["Image"] == f"josephyjq/mediasync@{DIGEST}"
     assert config["Cmd"] == UPDATER_COMMAND
+    assert config["Labels"]["io.mediasync.update.role"] == "updater"
+    assert config["Labels"]["io.mediasync.update.operation"] == OPERATION_ID
     assert "ExposedPorts" not in config
     assert config["HostConfig"]["NetworkMode"] == "none"
     assert config["HostConfig"]["AutoRemove"] is False
