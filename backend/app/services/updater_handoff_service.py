@@ -25,6 +25,10 @@ from app.services.image_target_service import (
 
 CONTAINER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 UPDATER_COMMAND = ["python", "-m", "app.updater"]
+UPDATE_ROLE_LABEL = "io.mediasync.update.role"
+UPDATE_OPERATION_LABEL = "io.mediasync.update.operation"
+UPDATER_ROLE = "updater"
+CANDIDATE_ROLE = "candidate"
 ALLOWED_RESTART_POLICIES = {"", "no", "always", "unless-stopped", "on-failure"}
 ALLOWED_MOUNT_TYPES = {"bind", "volume"}
 GENERATED_LABEL_PREFIXES = ("com.docker.", "org.opencontainers.image.")
@@ -318,7 +322,8 @@ def build_updater_create_config(
         "Env": [f"MEDIASYNC_UPDATE_OPERATION_ID={operation_id}"],
         "Labels": {
             "io.mediasync.updater": "true",
-            "io.mediasync.update.operation": operation_id,
+            UPDATE_ROLE_LABEL: UPDATER_ROLE,
+            UPDATE_OPERATION_LABEL: operation_id,
             "org.opencontainers.image.source": OFFICIAL_SOURCE,
         },
         "HostConfig": {

@@ -103,6 +103,8 @@ def test_prepare_writes_private_minimal_marker_and_trusted_candidate_identity(
     assert environment.count(f"MEDIASYNC_IMAGE_DIGEST={TARGET_DIGEST}") == 1
     assert not any("forged-token" in item for item in environment)
     assert preparation.create_config["Image"] == f"josephyjq/mediasync@{TARGET_DIGEST}"
+    assert preparation.create_config["Labels"]["io.mediasync.update.role"] == "candidate"
+    assert preparation.create_config["Labels"]["io.mediasync.update.operation"] == OPERATION_ID
 
 
 def test_retry_reuses_existing_token_instead_of_rotating_candidate_identity(

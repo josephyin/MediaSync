@@ -17,6 +17,11 @@ from app.services.update_snapshot_service import (
     fsync_directory,
     write_private_json,
 )
+from app.services.updater_handoff_service import (
+    CANDIDATE_ROLE,
+    UPDATE_OPERATION_LABEL,
+    UPDATE_ROLE_LABEL,
+)
 
 INTERNAL_CANDIDATE_ENVIRONMENT = frozenset(
     {
@@ -157,7 +162,11 @@ def build_candidate_create_config(
         "Image": document.target_image,
         "Env": environment,
         "User": candidate.user,
-        "Labels": dict(candidate.labels),
+        "Labels": {
+            **candidate.labels,
+            UPDATE_ROLE_LABEL: CANDIDATE_ROLE,
+            UPDATE_OPERATION_LABEL: document.operation_id,
+        },
         "ExposedPorts": {port: {} for port in candidate.exposed_ports},
         "HostConfig": {
             "Mounts": [
