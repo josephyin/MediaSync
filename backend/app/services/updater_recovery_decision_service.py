@@ -256,7 +256,9 @@ def _observe_source(
     matches = [item for item in containers if item.get("Id") == result.source_container_id]
     if not matches:
         return ContainerIdentityObservation("missing", reason_code="source_missing")
-    if len(matches) != 1 or not _valid_source(matches[0], document, result):
+    if len(matches) != 1 or not source_identity_matches(
+        matches[0], document, result
+    ):
         return ContainerIdentityObservation("conflict", reason_code="source_identity_conflict")
     return _matched(matches[0])
 
@@ -348,15 +350,25 @@ def _observe_coordinator(
     return _matched(coordinator)
 
 
-def _valid_source(
+def source_identity_matches(
     container: dict[str, Any],
     document: HandoffDocument,
     result: UpdaterResultV2,
 ) -> bool:
+    expected_name = result.source_container_name
+    if result.checkpoint in {
+        "old_renamed",
+        "candidate_created",
+        "candidate_started",
+        "candidate_verified",
+        "commit_requested",
+    }:
+        expected_name = f"mediasync-previous-{result.operation_id.split('-', 1)[0]}"
     return (
         container.get("Id") == document.current_container_id == result.source_container_id
         and container.get("Image") == document.source_image_id == result.source_image_id
-        and _name(container) == document.candidate.name == result.source_container_name
+        and document.candidate.name == result.source_container_name
+        and _name(container) == expected_name
         and _mount_matches(container, document=document, target="/data")
     )
 
