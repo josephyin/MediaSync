@@ -212,8 +212,10 @@ Updater 助手：
 - 不暴露端口；
 - 不运行 API、Scheduler、Worker 或 Provider；
 - 使用随机操作 ID 和不可预测容器名；
-- 设置 `AutoRemove`；
-- 不常驻，不参与正常运行；
+- 更新操作非终态期间使用 `unless-stopped`，不设置 `AutoRemove`；
+- 持有 `/data/update/updater.lock` 的独占文件锁；
+- 达到终态后先把自身 restart policy 改为 `no`，再退出并由 Appliance 清理；
+- 不参与正常业务运行；
 - 一次最多存在一个有效 updater；
 - 退出前必须把执行状态写入 `/data/update/operations/<operation_id>.json`；只有完成
   数据库提交确认后才能写入 `SUCCESS` 终态。
@@ -221,6 +223,9 @@ Updater 助手：
 Updater 保持 `NetworkMode=none`，不得为验证候选而临时加入业务网络、Host Network
 或访问候选容器的公开端口。候选运行信息通过第 6.1 节定义的验证证据文件交付，
 Docker Engine 中的容器状态和镜像 inspect 仍由 updater 直接读取。
+
+详细的崩溃恢复、持久检查点、并发 helper fencing 和旧结果协议兼容见
+[Updater 崩溃恢复协调器设计](updater-recovery-coordinator.md) 与 ADR-0008。
 
 ### 5.7 容器配置复制白名单
 
