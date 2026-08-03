@@ -217,6 +217,10 @@ Updater 助手：
 - 一次最多存在一个有效 updater；
 - 退出前必须把终态写入 `/data/update/operations/<operation_id>.json`。
 
+Updater 保持 `NetworkMode=none`，不得为验证候选而临时加入业务网络、Host Network
+或访问候选容器的公开端口。候选运行信息通过第 6.1 节定义的验证证据文件交付，
+Docker Engine 中的容器状态和镜像 inspect 仍由 updater 直接读取。
+
 ### 5.7 容器配置复制白名单
 
 不得把 Docker inspect 的结果整体原样提交给 create API。新容器只能从白名单
@@ -267,25 +271,114 @@ Updater 助手：
 
 这样 Docker 健康状态可以覆盖完整进程拓扑，但候选版本尚不能改变云盘远端状态。
 
+### 6.1.1 候选验证证据
+
+由于 updater 必须保持 `NetworkMode=none`，它不能依赖候选 HTTP API 作为验证通道。
+候选容器在满足以下全部条件后，必须原子写入：
+
+```text
+/data/update/operations/<operation_id>.candidate.json
+```
+
+写入前提：
+
+- `pending.json` schema、operation ID 和候选模式有效；
+- `pending.json` 包含创建候选前生成的不可预测 candidate token；
+- 候选实例 token 与 `pending.json` 中的 candidate token 一致；
+- 数据库迁移已完成，能够读取当前 Alembic revision；
+- Launcher、Nginx、API、Scheduler、Worker 五个组件全部健康；
+- Scheduler 和 Worker 仍被候选验证闸门阻止产生远端副作用。
+
+证据 schema v1 至少包含：
+
+```json
+{
+  "schema_version": 1,
+  "operation_id": "uuid",
+  "candidate_token": "不可预测随机值",
+  "mode": "candidate_validation",
+  "version": "v0.3.0",
+  "revision": "git commit sha",
+  "digest": "sha256:...",
+  "alembic_revision": "migration revision",
+  "components": {
+    "launcher": true,
+    "nginx": true,
+    "api": true,
+    "scheduler": true,
+    "worker": true
+  },
+  "observed_at": "UTC timestamp"
+}
+```
+
+候选的版本、revision 和 digest 可以来自创建候选时注入的已验证元数据，但证据
+文件不能成为这些字段的单独信任根。Updater 必须把它们再次与目标 handoff、候选
+容器 inspect、不可变镜像引用和 OCI 标签交叉核对。
+
+证据文件必须：
+
+- 使用 0600 权限和同目录临时文件原子替换；
+- 限制 schema、字段、文件大小和 operation ID；
+- 不包含密码、环境变量、Cookie、Token 或 Docker inspect 原文；
+- 通过 candidate token 防止同一 operation 的旧候选证据被复用；
+- 在成功提交或回滚完成后删除。
+
+不得为了候选验证新增无鉴权的版本接口，也不得把管理员 Session 或内部验证 token
+暴露给浏览器。
+
 ### 6.2 成功条件
 
 Updater 必须验证：
 
 - 容器达到 Docker `healthy`；
 - 五个 Appliance 组件全部健康；
-- API 报告的版本、源码修订和镜像 digest 与目标一致；
+- 候选证据中的 operation ID、candidate token、模式和五组件状态有效；
+- 候选证据中的版本、源码修订和镜像 digest 与 handoff、容器 inspect 和 OCI
+  标签一致；
 - 数据库处于 Alembic head；
 - 更新待提交模式仍然有效；
 - 容器在稳定观察窗口内没有重启或子进程退出。
 
+稳定观察窗口从 Docker 报告候选为 `healthy` 且有效候选证据写入后开始。观察期间
+Updater 必须持续检查容器 ID、`RestartCount`、`StartedAt`、健康状态和候选证据；
+任一项变化都应重新计时或判定失败，不能只读取一次健康结果后立即提交。
+
 全部成功后：
 
-1. 原子写入提交结果；
-2. 删除 `pending.json`；
-3. 让 Scheduler 和 Worker 解除更新闸门；
-4. 删除旧容器；
-5. 保留更新快照；
-6. Updater 自动退出并删除。
+1. Updater 原子写入 `SUCCESS` 终态结果；
+2. 候选 Appliance 的更新对账器读取并严格验证结果文件；
+3. 对账器在数据库事务中把活动更新操作推进到 `SUCCESS` 并释放活动槽；
+4. 数据库提交成功后，对账器删除 `pending.json` 和候选验证证据；
+5. Updater 确认数据库活动槽已经释放且两个标记都消失；
+6. Updater 删除已停止的旧容器；
+7. 保留更新快照；
+8. Updater 自动退出并删除。
+
+不能仅删除 `pending.json` 来表示提交成功。更新执行闸门还会根据数据库中的活动
+更新操作阻止 Scheduler 和 Worker，必须先完成终态数据库事务。
+
+### 6.2.1 终态对账握手
+
+Updater 停止旧容器后不直接修改正在被候选使用的 SQLite 数据库。它通过：
+
+```text
+/data/update/operations/<operation_id>.json
+```
+
+发布 `SUCCESS`、`ROLLED_BACK` 或 `ROLLBACK_FAILED` 终态。Appliance 在启动屏障后、
+允许 Scheduler 和 Worker 执行前运行更新对账器：
+
+- 严格校验结果 schema、operation ID、合法状态转换和活动更新记录；
+- 在单个数据库事务中写入对应终态并释放 `active_slot`；
+- 数据库提交成功后再删除 `pending.json`、候选证据和已消费的 handoff；
+- 删除标记失败时保持执行闸门关闭并在下次循环重试清理；
+- 终态结果已对账时必须幂等返回，不能重复复用历史操作；
+- `ROLLBACK_FAILED` 不自动解除闸门，必须保留人工恢复信息。
+
+Updater 只有在观察到数据库终态和标记清理完成后，才认为候选提交或旧版本恢复
+完成。若等待超时，不能同时启动两个 MediaSync 容器，也不能把尚未对账的状态
+报告为成功。
 
 ### 6.3 失败回滚
 
@@ -293,11 +386,12 @@ Updater 必须验证：
 
 1. 停止并删除候选容器；
 2. 恢复数据库与运行时密钥快照；
-3. 清除候选版本写入的临时更新标记；
+3. 清除候选版本写入的验证证据和临时更新标记；
 4. 以原名称和原配置恢复旧容器；
 5. 启动旧容器并验证健康；
-6. 写入 `ROLLED_BACK` 或 `ROLLBACK_FAILED`；
-7. 保留 updater 日志和快照供诊断。
+6. 写入 `ROLLED_BACK`，由旧版本 Appliance 对账并释放更新闸门；
+7. 旧版本也无法健康启动时写入 `ROLLBACK_FAILED`，保留人工恢复闸门；
+8. 保留 updater 日志和快照供诊断。
 
 恢复旧容器前必须恢复更新前数据库，不能让旧代码直接读取候选版本已经迁移的
 数据库。
