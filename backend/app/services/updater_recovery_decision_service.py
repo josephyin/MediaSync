@@ -10,6 +10,7 @@ from app.services.docker_capability_service import (
 )
 from app.services.update_execution_gate import PendingUpdateMarker
 from app.services.update_snapshot_service import (
+    ROLLBACK_CHECKPOINTS,
     HandoffDocument,
     UpdaterResult,
     UpdaterResultV2,
@@ -355,7 +356,7 @@ def source_identity_matches(
     document: HandoffDocument,
     result: UpdaterResultV2,
 ) -> bool:
-    expected_name = result.source_container_name
+    expected_names = {result.source_container_name}
     if result.checkpoint in {
         "old_renamed",
         "candidate_created",
@@ -363,12 +364,21 @@ def source_identity_matches(
         "candidate_verified",
         "commit_requested",
     }:
-        expected_name = f"mediasync-previous-{result.operation_id.split('-', 1)[0]}"
+        expected_names = {
+            f"mediasync-previous-{result.operation_id.split('-', 1)[0]}"
+        }
+    elif result.checkpoint in ROLLBACK_CHECKPOINTS:
+        restored_index = ROLLBACK_CHECKPOINTS.index("old_name_restored")
+        current_index = ROLLBACK_CHECKPOINTS.index(result.checkpoint)
+        if current_index < restored_index:
+            expected_names.add(
+                f"mediasync-previous-{result.operation_id.split('-', 1)[0]}"
+            )
     return (
         container.get("Id") == document.current_container_id == result.source_container_id
         and container.get("Image") == document.source_image_id == result.source_image_id
         and document.candidate.name == result.source_container_name
-        and _name(container) == expected_name
+        and _name(container) in expected_names
         and _mount_matches(container, document=document, target="/data")
     )
 
