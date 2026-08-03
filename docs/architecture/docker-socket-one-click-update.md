@@ -215,7 +215,8 @@ Updater 助手：
 - 设置 `AutoRemove`；
 - 不常驻，不参与正常运行；
 - 一次最多存在一个有效 updater；
-- 退出前必须把终态写入 `/data/update/operations/<operation_id>.json`。
+- 退出前必须把执行状态写入 `/data/update/operations/<operation_id>.json`；只有完成
+  数据库提交确认后才能写入 `SUCCESS` 终态。
 
 Updater 保持 `NetworkMode=none`，不得为验证候选而临时加入业务网络、Host Network
 或访问候选容器的公开端口。候选运行信息通过第 6.1 节定义的验证证据文件交付，
@@ -346,17 +347,23 @@ Updater 必须持续检查容器 ID、`RestartCount`、`StartedAt`、健康状�
 
 全部成功后：
 
-1. Updater 原子写入 `SUCCESS` 终态结果；
-2. 候选 Appliance 的更新对账器读取并严格验证结果文件；
+1. Updater 原子写入非终态 `COMMIT_REQUESTED`；
+2. 候选 Appliance 的更新对账器读取并严格验证提交请求；
 3. 对账器在数据库事务中把活动更新操作推进到 `SUCCESS` 并释放活动槽；
-4. 数据库提交成功后，对账器删除 `pending.json` 和候选验证证据；
-5. Updater 确认数据库活动槽已经释放且两个标记都消失；
-6. Updater 删除已停止的旧容器；
-7. 保留更新快照；
-8. Updater 自动退出并删除。
+4. 数据库提交成功后，对账器删除 `pending.json`、候选验证证据和已消费的
+   handoff；
+5. Updater 确认数据库状态为 `SUCCESS`、活动槽已经释放且三个运行标记都消失；
+6. Updater 把结果文件从 `COMMIT_REQUESTED` 推进到 `SUCCESS`；
+7. Updater 删除已停止的旧容器；
+8. 保留更新快照；
+9. Updater 自动退出并删除。
 
 不能仅删除 `pending.json` 来表示提交成功。更新执行闸门还会根据数据库中的活动
 更新操作阻止 Scheduler 和 Worker，必须先完成终态数据库事务。
+
+`COMMIT_REQUESTED` 是不可回滚边界。进入该状态后，候选数据库可能随时完成提交，
+Updater 不得再恢复旧数据库或启动旧容器。等待确认超时时必须保持候选运行、旧容器
+停止，不得写入 `SUCCESS`，并保留可恢复现场。
 
 ### 6.2.1 终态对账握手
 
@@ -366,23 +373,39 @@ Updater 停止旧容器后不直接修改正在被候选使用的 SQLite 数据�
 /data/update/operations/<operation_id>.json
 ```
 
-发布 `SUCCESS`、`ROLLED_BACK` 或 `ROLLBACK_FAILED` 终态。Appliance 在启动屏障后、
-允许 Scheduler 和 Worker 执行前运行更新对账器：
+发布 `COMMIT_REQUESTED` 提交请求，或 `ROLLED_BACK`、`ROLLBACK_FAILED` 回滚终态。
+Appliance 在启动屏障后、允许 Scheduler 和 Worker 执行前运行更新对账器：
 
 - 严格校验结果 schema、operation ID、合法状态转换和活动更新记录；
+- 只有 `COMMIT_REQUESTED` 才能请求数据库进入 `SUCCESS`；
 - 在单个数据库事务中写入对应终态并释放 `active_slot`；
 - 数据库提交成功后再删除 `pending.json`、候选证据和已消费的 handoff；
 - 删除标记失败时保持执行闸门关闭并在下次循环重试清理；
 - 终态结果已对账时必须幂等返回，不能重复复用历史操作；
 - `ROLLBACK_FAILED` 不自动解除闸门，必须保留人工恢复信息。
 
-Updater 只有在观察到数据库终态和标记清理完成后，才认为候选提交或旧版本恢复
-完成。若等待超时，不能同时启动两个 MediaSync 容器，也不能把尚未对账的状态
-报告为成功。
+Updater 只有在观察到数据库终态和标记清理完成后，才把结果推进为 `SUCCESS`。
+若等待超时，结果保持 `COMMIT_REQUESTED`，不能同时启动两个 MediaSync 容器，
+也不能把尚未确认的状态报告为成功。Updater 或后续恢复协调器重启后必须先读取
+数据库终态和运行标记：已提交则收敛到 `SUCCESS` 并清理旧容器，未确认则保持安全
+停止并继续等待，禁止猜测性回滚。
+
+### 6.2.2 重启策略 fencing
+
+停止旧容器前，Updater 必须记录其原始 restart policy，并通过 Docker Engine 把旧
+容器的 restart policy 临时改为 `no`。候选容器仍使用 handoff 中记录的原始策略。
+
+这样即使 NAS 或 Docker daemon 在切换、验证或提交不确定阶段重启，也只能自动拉起
+候选容器，不会同时拉起旧容器。只有在进入回滚路径、候选已经停止且旧数据快照恢复
+完成后，Updater 才能恢复旧容器原始 restart policy 并启动旧容器。
+
+若 restart policy fencing 未成功，Updater 不得停止旧容器。若 fencing 后 Updater
+崩溃，恢复流程必须先根据结果状态和容器身份判断继续提交还是回滚，不能直接恢复旧
+策略。
 
 ### 6.3 失败回滚
 
-候选容器在超时、退出或健康失败时：
+候选容器在超时、退出或健康失败，且结果尚未进入 `COMMIT_REQUESTED` 时：
 
 1. 停止并删除候选容器；
 2. 恢复数据库与运行时密钥快照；
@@ -399,7 +422,16 @@ Updater 只有在观察到数据库终态和标记清理完成后，才认为候
 如果旧容器也无法恢复，Updater 不得继续重复重建。它必须保留快照、停止自动
 操作，并输出可在 NAS 终端执行的恢复说明。
 
+进入 `COMMIT_REQUESTED` 后发生的确认超时、Updater 崩溃或网络错误不属于自动回滚
+条件。此时恢复旧快照会与可能已经提交的候选数据库产生竞态，必须按第 6.2.1 节的
+提交恢复规则收敛。
+
 ## 7. 更新状态机
+
+数据库中的 `update_operations` 与 updater 结果文件承担不同职责，不能把两者合并成
+一套状态后由两个进程共同写入。
+
+数据库业务状态由 Appliance 独占写入：
 
 ```text
 CHECKING
@@ -423,6 +455,17 @@ VERIFYING
               └──→ ROLLBACK_FAILED
 ```
 
+Updater 结果文件的成功路径为：
+
+```text
+SNAPSHOTTING -> SWITCHING -> VERIFYING -> COMMIT_REQUESTED -> SUCCESS
+```
+
+其中 `COMMIT_REQUESTED` 只属于 updater 结果协议，不写入
+`update_operations.status`。Appliance 看到有效请求后，以单个数据库事务执行
+`VERIFYING -> SUCCESS` 并释放 `active_slot`；Updater 观察到该事务和标记清理完成
+后，再推进结果文件。
+
 终态为：
 
 - `SUCCESS`
@@ -433,6 +476,14 @@ VERIFYING
 
 一次只能有一个非终态更新操作。终态操作记录不得被复用，敏感 Docker inspect
 内容不得写入记录。
+
+在 updater 结果协议中，`COMMIT_REQUESTED` 是非终态但不可回滚的提交不确定状态。
+允许的转换只有：
+
+- `VERIFYING -> COMMIT_REQUESTED`；
+- `COMMIT_REQUESTED -> SUCCESS`。
+
+不得定义 `COMMIT_REQUESTED -> ROLLING_BACK`。
 
 ## 8. API 契约
 
@@ -594,6 +645,9 @@ Docker Hub、群晖和飞牛文档必须把这项挂载标记为“可选、高�
 - 新版本迁移失败后恢复旧数据库和旧容器；
 - 新版本健康超时后自动回滚；
 - Updater 崩溃后可以根据持久化状态恢复或安全停止；
+- `COMMIT_REQUESTED` 等待超时时不会启动旧容器或伪造 `SUCCESS`；
+- 数据库已提交但 Updater 未确认时，重启后可以收敛到 `SUCCESS`；
+- 切换期间 NAS 或 Docker daemon 重启不会同时自动拉起新旧两个容器；
 - 回滚过程中 NAS 重启后仍能识别未完成操作；
 - 成功升级后端口、挂载、网络、环境变量和重启策略不变；
 - updater 助手最终不存在；
