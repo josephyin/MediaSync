@@ -322,7 +322,11 @@ def build_updater_create_config(
             "org.opencontainers.image.source": OFFICIAL_SOURCE,
         },
         "HostConfig": {
-            "AutoRemove": True,
+            "AutoRemove": False,
+            "RestartPolicy": {
+                "Name": "unless-stopped",
+                "MaximumRetryCount": 0,
+            },
             "NetworkMode": "none",
             "ReadonlyRootfs": True,
             "CapDrop": ["ALL"],

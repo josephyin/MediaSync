@@ -204,7 +204,11 @@ async def test_prepare_writes_private_intent_and_creates_restricted_updater(
     assert config["Cmd"] == UPDATER_COMMAND
     assert "ExposedPorts" not in config
     assert config["HostConfig"]["NetworkMode"] == "none"
-    assert config["HostConfig"]["AutoRemove"] is True
+    assert config["HostConfig"]["AutoRemove"] is False
+    assert config["HostConfig"]["RestartPolicy"] == {
+        "Name": "unless-stopped",
+        "MaximumRetryCount": 0,
+    }
     assert config["HostConfig"]["CapDrop"] == ["ALL"]
     mounts = config["HostConfig"]["Mounts"]
     assert {(item["Source"], item["Target"]) for item in mounts} == {
