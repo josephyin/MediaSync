@@ -368,36 +368,64 @@ RECOVERABLE_FAULTS = (
     "after_checkpoint:initialized",
     "before:old_restart_fenced",
     "after_effect:old_restart_fenced",
+    "before_checkpoint:snapshotting:old_restart_fenced",
     "after_checkpoint:snapshotting:old_restart_fenced",
     "before:old_stopped",
     "after_effect:old_stopped",
+    "before_checkpoint:snapshotting:old_stopped",
     "after_checkpoint:snapshotting:old_stopped",
     "before:pending_ready",
     "after_effect:pending_ready",
+    "before_checkpoint:snapshotting:pending_ready",
     "after_checkpoint:snapshotting:pending_ready",
     "before:snapshot_verified",
     "after_effect:snapshot_verified",
+    "before_checkpoint:snapshotting:snapshot_verified",
     "after_checkpoint:snapshotting:snapshot_verified",
     "before:old_renamed",
     "after_effect:old_renamed",
+    "before_checkpoint:switching:old_renamed",
     "after_checkpoint:switching:old_renamed",
     "before:candidate_created",
     "after_effect:candidate_created",
+    "before_checkpoint:switching:candidate_created",
     "after_checkpoint:switching:candidate_created",
     "before:candidate_started",
     "after_effect:candidate_started",
+    "before_checkpoint:switching:candidate_started",
     "after_checkpoint:switching:candidate_started",
+    "before_checkpoint:verifying:candidate_started",
     "after_checkpoint:verifying:candidate_started",
     "before:candidate_verified",
     "after_effect:candidate_verified",
+    "before_checkpoint:verifying:candidate_verified",
     "after_checkpoint:verifying:candidate_verified",
+    "before_checkpoint:commit_requested:commit_requested",
     "after_checkpoint:commit_requested:commit_requested",
     "before:commit_confirmed",
     "after_effect:commit_confirmed",
+    "before_checkpoint:success:commit_requested",
     "after_checkpoint:success:commit_requested",
     "before:old_removed",
     "after_effect:old_removed",
 )
+
+
+@pytest.mark.asyncio
+async def test_forward_fault_matrix_covers_every_emitted_hook(tmp_path: Path) -> None:
+    write_handoff(tmp_path)
+    events: list[str] = []
+
+    await executor(
+        tmp_path,
+        engine=MutableEngine(),
+        snapshot=FakeSnapshotService(tmp_path),
+        verifier=FakeVerifier(),
+        waiter=FakeCommitWaiter(),
+        fault_hook=events.append,
+    ).execute(operation_id=OPERATION_ID)
+
+    assert set(events) <= set(RECOVERABLE_FAULTS)
 
 
 @pytest.mark.asyncio
@@ -536,36 +564,63 @@ async def test_rollback_v2_restores_old_container_and_publishes_terminal(
 ROLLBACK_FAULTS = (
     "before:rollback_started",
     "after_effect:rollback_started",
+    "before_checkpoint:rolling_back:rollback_started",
     "after_checkpoint:rolling_back:rollback_started",
     "before:candidate_stopped",
     "after_effect:candidate_stopped",
+    "before_checkpoint:rolling_back:candidate_stopped",
     "after_checkpoint:rolling_back:candidate_stopped",
     "before:candidate_removed",
     "after_effect:candidate_removed",
+    "before_checkpoint:rolling_back:candidate_removed",
     "after_checkpoint:rolling_back:candidate_removed",
     "before:snapshot_restored",
     "after_effect:snapshot_restored",
+    "before_checkpoint:rolling_back:snapshot_restored",
     "after_checkpoint:rolling_back:snapshot_restored",
     "before:candidate_evidence_removed",
     "after_effect:candidate_evidence_removed",
+    "before_checkpoint:rolling_back:candidate_evidence_removed",
     "after_checkpoint:rolling_back:candidate_evidence_removed",
     "before:old_name_restored",
     "after_effect:old_name_restored",
+    "before_checkpoint:rolling_back:old_name_restored",
     "after_checkpoint:rolling_back:old_name_restored",
     "before:old_policy_restored",
     "after_effect:old_policy_restored",
+    "before_checkpoint:rolling_back:old_policy_restored",
     "after_checkpoint:rolling_back:old_policy_restored",
     "before:old_started",
     "after_effect:old_started",
+    "before_checkpoint:rolling_back:old_started",
     "after_checkpoint:rolling_back:old_started",
     "before:old_verified",
     "after_effect:old_verified",
+    "before_checkpoint:rolling_back:old_verified",
     "after_checkpoint:rolling_back:old_verified",
     "before:rollback_published",
     "after_effect:rollback_published",
+    "before_checkpoint:rolling_back:rollback_published",
     "after_checkpoint:rolling_back:rollback_published",
+    "before_checkpoint:rolled_back:rollback_published",
     "after_checkpoint:rolled_back:rollback_published",
 )
+
+
+@pytest.mark.asyncio
+async def test_rollback_fault_matrix_covers_every_emitted_hook(tmp_path: Path) -> None:
+    engine, snapshot, previous = await prepare_candidate_for_rollback(tmp_path)
+    events: list[str] = []
+
+    await rollback_executor(
+        tmp_path,
+        engine=engine,
+        snapshot=snapshot,
+        previous_verifier=previous,
+        fault_hook=events.append,
+    ).execute(operation_id=OPERATION_ID)
+
+    assert set(events) <= set(ROLLBACK_FAULTS)
 
 
 @pytest.mark.asyncio

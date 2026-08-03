@@ -129,6 +129,22 @@ jobs:
             --format '{{json .Config.Healthcheck}}' \
             | jq -e '.Test == ["CMD", "python", "-m", "app.appliance.healthcheck"]'
 
+      - name: 演练 Updater 持久锁与重启策略
+        run: |
+          mkdir -p "${RUNNER_TEMP}/updater-rehearsals"
+          ./scripts/updater_recovery_rehearsal.sh \
+            "${CI_IMAGE}" \
+            docker \
+            "${RUNNER_TEMP}/updater-rehearsals"
+          jq -e '
+            .checks.exclusive_flock == true
+            and .checks.helper_restart == true
+            and .checks.lock_reacquired_after_restart == true
+            and .checks.restart_policy_disarmed == true
+            and .checks.lock_released_after_stop == true
+            and .checks.restart_count >= 1
+          ' "${RUNNER_TEMP}"/updater-rehearsals/*.json
+
       - name: 启动 Appliance 冒烟容器
         run: |
           docker volume create "${CI_VOLUME}"
