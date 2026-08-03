@@ -110,10 +110,14 @@ def marker() -> PendingUpdateMarker:
     )
 
 
-def source_container(*, running: bool = False) -> dict[str, Any]:
+def source_container(
+    *,
+    running: bool = False,
+    name: str = "mediasync-previous-12345678",
+) -> dict[str, Any]:
     return {
         "Id": SOURCE_ID,
-        "Name": "/MediaSync",
+        "Name": f"/{name}",
         "Image": SOURCE_IMAGE_ID,
         "Config": {"Image": "josephyjq/mediasync:v0.2.0-rc.9"},
         "State": {"Running": running},
@@ -235,6 +239,31 @@ async def test_docker_identity_observation_strictly_matches_all_roles() -> None:
         "matched", COORDINATOR_ID, True
     )
     assert set(engine.inspected) == {SOURCE_ID, CANDIDATE_ID, COORDINATOR_ID}
+
+
+@pytest.mark.asyncio
+async def test_source_keeps_original_name_before_rename_checkpoint() -> None:
+    current = result(
+        status="snapshotting",
+        checkpoint="pending_ready",
+        candidate_id=None,
+    )
+    engine = FakeEngine([
+        source_container(name="MediaSync", running=True),
+        coordinator_container(),
+    ])
+
+    observed = await UpdaterDockerIdentityService(
+        engine=engine,
+        socket_path=SOCKET_PATH,
+    ).observe(
+        document=handoff(),
+        result=current,
+        marker=marker(),
+        hostname=COORDINATOR_ID[:12],
+    )
+
+    assert observed.source.status == "matched"
 
 
 @pytest.mark.asyncio
