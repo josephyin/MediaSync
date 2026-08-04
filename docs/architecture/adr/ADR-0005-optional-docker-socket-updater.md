@@ -1,10 +1,10 @@
 # ADR-0005：Docker Socket 可选一键镜像升级
 
-- 状态：已接受
+- 状态：已由 ADR-0009 取代
 - 日期：2026-07-31
 - 决策者：MediaSync 维护者
 - 取代：无
-- 被取代：无
+- 被取代：ADR-0009
 - 相关内容：[Docker Socket 一键镜像升级设计](../docker-socket-one-click-update.md)
 
 ## 背景
