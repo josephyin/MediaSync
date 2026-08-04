@@ -15,7 +15,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前候选版本为 `v0.2.0-rc.10`。普通用户可以用一个容器直接运行；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。版本仍处于稳定性观察期，默认 Web 私有接口可能随上游更新失效。
+> 当前候选版本为 `v0.2.0-rc.11`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。版本仍处于稳定性观察期，默认 Web 私有接口可能随上游更新失效。
 
 ## MVP 功能
 
@@ -27,6 +27,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - 幂等转存任务和失败重试
 - 文件记录、转存历史和任务日志
 - Provider 注册机制
+- 实验性 Web 一键镜像更新、任务排空、健康验证和失败回滚
 - 单容器 Docker 部署与高级 Docker Compose 部署
 
 ## 技术栈
@@ -46,9 +47,10 @@ docker run -d \
   --name mediasync \
   -p 9090:9090 \
   -v /你的路径/mediasync:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.10
+  josephyjq/mediasync:v0.2.0-rc.11
 ```
 
 访问 `http://NAS_IP:9090`，默认管理员用户名和密码均为 `admin`。首次登录后
@@ -62,10 +64,11 @@ docker run -d \
   --name mediasync \
   -p 9090:9090 \
   -v /你的路径/mediasync:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.10
+  josephyjq/mediasync:v0.2.0-rc.11
 ```
 
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
@@ -75,7 +78,8 @@ docker run -d \
 [群晖 DSM 安装教程](docs/deployment/synology.md)。
 
 > 默认配置适用于局域网 HTTP，不要把管理端口直接暴露到公网。通过 HTTPS
-> 反向代理访问时，请增加 `-e SESSION_COOKIE_SECURE=true`。
+> 反向代理访问时，请增加 `-e SESSION_COOKIE_SECURE=true`。Docker Socket 等同于
+> 宿主机 Docker 管理员权限；不需要一键更新时可以删除该映射，其他功能不受影响。
 
 ### Docker Compose（高级）
 
@@ -92,7 +96,7 @@ SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.10
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.11
 ```
 
 ```bash
@@ -205,6 +209,7 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.8` 工程质量与运维能力预发布版
 - [x] 发布 `v0.2.0-rc.9` 任务执行信息修复预发布版
 - [x] 发布 `v0.2.0-rc.10` Updater 恢复协调器演练候选版
+- [x] 准备 `v0.2.0-rc.11` Web 一键更新候选版
 - [ ] 完成 v0.2 八周稳定性观察
 - [ ] 发布 `v0.2.0` 正式版
 - [ ] 夸克网盘 Provider
