@@ -24,6 +24,7 @@ docker run -d \
   --name mediasync \
   -p 9090:9090 \
   -v /你的路径/mediasync:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
   josephyjq/mediasync:v0.2.0-rc.10
@@ -44,9 +45,12 @@ ADMIN_PASSWORD=你的强密码
 |---|---|
 | 端口 | 宿主机 `9090` → 容器 `9090` |
 | 存储 | 宿主机数据目录 → 容器 `/data`，读写 |
+| 一键更新 | `/var/run/docker.sock` → `/var/run/docker.sock`，读写 |
 | 重启策略 | `unless-stopped` |
 
-不需要特权模式，不需要 Docker Socket，不需要映射内部 API 端口 `8000`。
+不需要特权模式，也不需要映射内部 API 端口 `8000`。Docker Socket 等同于宿主机
+Docker 管理员权限，只应交给可信官方镜像；不需要一键更新时可以删除该映射，
+其他功能不受影响。
 
 ## 数据与备份
 
