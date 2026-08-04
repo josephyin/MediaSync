@@ -98,6 +98,79 @@ def write_candidate_evidence(tmp_path: Path, pending: Path) -> None:
     ).observe(COMPONENTS)
 
 
+def write_v2_result(
+    operations: Path,
+    *,
+    status: str,
+    checkpoint: str,
+) -> None:
+    candidate_ready = checkpoint in {
+        "candidate_created",
+        "candidate_started",
+        "candidate_verified",
+        "commit_requested",
+    }
+    token_ready = checkpoint not in {
+        "initialized",
+        "old_restart_fenced",
+        "old_stopped",
+    }
+    (operations / f"{OPERATION_ID}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "operation_id": OPERATION_ID,
+                "sequence": 8,
+                "status": status,
+                "checkpoint": checkpoint,
+                "recovery_generation": 0,
+                "coordinator_container_id": "c" * 64,
+                "source_container_id": "d" * 64,
+                "source_image_id": f"sha256:{'e' * 64}",
+                "source_container_name": "mediasync",
+                "target_image": f"josephyjq/mediasync@{DIGEST}",
+                "target_revision": REVISION,
+                "candidate_token_hash": f"sha256:{'f' * 64}" if token_ready else None,
+                "candidate_container_id": "a" * 64 if candidate_ready else None,
+                "rollback_started": False,
+                "updated_at": datetime.now(UTC).isoformat(),
+                "error_code": None,
+                "public_error_message": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_v2_result_synchronizes_database_progress_for_candidate_validation(
+    tmp_path: Path,
+) -> None:
+    factory, pending, operations = prepare_runtime(
+        tmp_path,
+        operation_status="handoff",
+        result_status="switching",
+    )
+    write_v2_result(
+        operations,
+        status="verifying",
+        checkpoint="candidate_started",
+    )
+
+    changed = UpdateTerminalReconciler(
+        session_factory=factory,
+        data_directory=tmp_path,
+        pending_path=pending,
+        allow_active_commit=True,
+    ).reconcile()
+
+    with factory() as session:
+        operation = UpdateOperationRepository(session).get_active()
+        assert operation is not None
+        assert operation.status == "verifying"
+    assert changed is True
+    assert pending.exists()
+
+
 def test_commit_requested_result_commits_terminal_state_then_cleans_runtime_markers(
     tmp_path: Path,
 ) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from collections.abc import Callable
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from app.services.update_execution_gate import UpdateExecutionGate
+from app.services.update_execution_gate import PendingUpdateMarker, UpdateExecutionGate
 from app.services.update_snapshot_service import (
     MAX_RECOVERY_GENERATION,
     HandoffDocument,
@@ -417,6 +418,46 @@ class ExitedUpdaterCleanupService:
                 await self._engine.remove_container(container_id)
                 removed.append(container_id)
         return tuple(removed)
+
+
+class ExitedUpdaterCleanupObserver:
+    """在候选提交终态后清理已经解除重启策略的 helper。"""
+
+    def __init__(
+        self,
+        *,
+        cleanup_service: ExitedUpdaterCleanupService,
+        data_directory: Path,
+        pending_path: Path,
+    ) -> None:
+        self._cleanup_service = cleanup_service
+        self._data_directory = Path(data_directory)
+        self._pending_path = Path(pending_path)
+        self._document: HandoffDocument | None = None
+
+    def observe(self) -> tuple[str, ...]:
+        if self._document is None:
+            marker = UpdateExecutionGate(
+                pending_path=str(self._pending_path)
+            ).read_pending_marker()
+            if not isinstance(marker, PendingUpdateMarker):
+                return ()
+            path = (
+                self._data_directory
+                / "update"
+                / "operations"
+                / f"{marker.operation_id}.handoff.json"
+            )
+            self._document = read_handoff(
+                path,
+                expected_operation_id=marker.operation_id,
+            )
+        removed = asyncio.run(
+            self._cleanup_service.cleanup(document=self._document)
+        )
+        if removed:
+            self._document = None
+        return removed
 
 
 def _environment(value: object) -> dict[str, str]:

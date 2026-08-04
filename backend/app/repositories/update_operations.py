@@ -83,6 +83,13 @@ class UpdateOperationRepository:
             .limit(1)
         )
 
+    def get_latest(self) -> UpdateOperation | None:
+        return self._session.scalar(
+            select(UpdateOperation)
+            .order_by(UpdateOperation.created_at.desc(), UpdateOperation.id.desc())
+            .limit(1)
+        )
+
     def finish(
         self,
         operation: UpdateOperation,

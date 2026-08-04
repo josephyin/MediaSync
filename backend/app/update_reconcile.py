@@ -16,6 +16,7 @@ from app.services.candidate_evidence_service import (
 from app.services.update_execution_gate import PendingUpdateMarker, UpdateExecutionGate
 from app.services.update_snapshot_service import (
     UpdaterResultJournal,
+    UpdaterResultV2,
     UpdateSnapshotError,
     fsync_directory,
     read_alembic_revision,
@@ -69,6 +70,7 @@ class UpdateTerminalReconciler:
             if operation is None:
                 raise UpdateReconciliationError("终态结果对应的更新操作不存在")
 
+            progressed = False
             if operation.active_slot is None:
                 if operation.status not in {"success", "rolled_back"}:
                     raise UpdateReconciliationError("更新操作已经以其他终态结束")
@@ -79,6 +81,18 @@ class UpdateTerminalReconciler:
                 )
                 if result.status not in expected_results:
                     raise UpdateReconciliationError("数据库终态与 updater 结果不一致")
+            else:
+                progressed = self._synchronize_active_progress(
+                    repository,
+                    operation,
+                    marker,
+                    result,
+                )
+                if progressed:
+                    session.commit()
+
+            if operation.active_slot is None:
+                pass
             elif result.status == "rollback_failed":
                 logger.error(
                     "update_rollback_failed operation_id=%s manual_intervention_required=true",
@@ -114,10 +128,54 @@ class UpdateTerminalReconciler:
                 )
                 session.commit()
             else:
-                return False
+                return progressed
 
         self._cleanup(marker.operation_id)
         return True
+
+    @staticmethod
+    def _synchronize_active_progress(
+        repository: UpdateOperationRepository,
+        operation: UpdateOperation,
+        marker: PendingUpdateMarker,
+        result: object,
+    ) -> bool:
+        if not isinstance(result, UpdaterResultV2):
+            return False
+        if (
+            operation.target_version != marker.target_version
+            or operation.target_digest != marker.target_digest
+        ):
+            raise UpdateReconciliationError("updater 进度与更新目标不匹配")
+        target_status = {
+            "snapshotting": "snapshotting",
+            "switching": "switching",
+            "verifying": "verifying",
+            "commit_requested": "verifying",
+            "rolling_back": "rolling_back",
+        }.get(result.status)
+        if target_status is None or operation.status == target_status:
+            return False
+
+        forward_order = ("handoff", "snapshotting", "switching", "verifying")
+        if target_status == "rolling_back":
+            if operation.status not in forward_order:
+                raise UpdateReconciliationError("updater 回滚进度与数据库状态不匹配")
+            if operation.status == "handoff":
+                repository.transition_active(operation, status="snapshotting")
+            repository.transition_active(operation, status="rolling_back")
+            return True
+
+        try:
+            current_index = forward_order.index(operation.status)
+            target_index = forward_order.index(target_status)
+        except ValueError as exc:
+            raise UpdateReconciliationError("updater 前向进度与数据库状态不匹配") from exc
+        if target_index < current_index:
+            raise UpdateReconciliationError("updater 进度不得倒退")
+        for status in forward_order[current_index + 1 : target_index + 1]:
+            repository.transition_active(operation, status=status)
+        return target_index > current_index
 
     @staticmethod
     def _advance_rollback_state(

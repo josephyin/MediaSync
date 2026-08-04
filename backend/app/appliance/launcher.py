@@ -66,6 +66,10 @@ class UpdateTerminalObserver(Protocol):
     def reconcile(self) -> bool: ...
 
 
+class ExitedUpdaterObserver(Protocol):
+    def observe(self) -> tuple[str, ...]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessSpec:
     name: str
@@ -205,6 +209,7 @@ class ApplianceLauncher:
         health_socket_path: Path = DEFAULT_HEALTH_SOCKET_PATH,
         candidate_evidence_observer: CandidateEvidenceObserver | None = None,
         update_terminal_observer: UpdateTerminalObserver | None = None,
+        exited_updater_observer: ExitedUpdaterObserver | None = None,
     ) -> None:
         if api_startup_timeout_seconds <= 0:
             raise ValueError("api_startup_timeout_seconds must be positive")
@@ -223,6 +228,7 @@ class ApplianceLauncher:
         self._health_server: ApplianceHealthServer | None = None
         self._candidate_evidence_observer = candidate_evidence_observer
         self._update_terminal_observer = update_terminal_observer
+        self._exited_updater_observer = exited_updater_observer
         self._children: dict[str, tuple[ProcessSpec, ManagedProcess]] = {}
 
     def prepare_environment(self) -> dict[str, str]:
@@ -302,6 +308,28 @@ class ApplianceLauncher:
                     pending_path=self._data_directory / "update" / "pending.json",
                     allow_active_commit=True,
                 )
+            if self._exited_updater_observer is None:
+                settings = get_settings()
+                socket_path = Path(settings.docker_socket_path)
+                if socket_path.is_socket():
+                    from app.services.docker_capability_service import DockerEngineClient
+                    from app.services.updater_coordinator_service import (
+                        ExitedUpdaterCleanupObserver,
+                        ExitedUpdaterCleanupService,
+                    )
+
+                    engine = DockerEngineClient(
+                        socket_path=settings.docker_socket_path,
+                        timeout_seconds=settings.docker_api_timeout_seconds,
+                    )
+                    self._exited_updater_observer = ExitedUpdaterCleanupObserver(
+                        cleanup_service=ExitedUpdaterCleanupService(
+                            engine=engine,
+                            socket_path=settings.docker_socket_path,
+                        ),
+                        data_directory=self._data_directory,
+                        pending_path=self._data_directory / "update" / "pending.json",
+                    )
             self._run_startup_barriers(environment)
             self._start(API, environment)
             self._api_waiter(
@@ -380,6 +408,16 @@ class ApplianceLauncher:
                     )
                 except CandidateEvidenceError as exc:
                     logger.warning("candidate_evidence_not_ready reason=%s", exc)
+            if self._exited_updater_observer is not None:
+                try:
+                    removed = self._exited_updater_observer.observe()
+                    if removed:
+                        logger.info(
+                            "exited_updater_helpers_removed count=%d",
+                            len(removed),
+                        )
+                except Exception:
+                    logger.warning("exited_updater_cleanup_pending", exc_info=True)
             if self._update_terminal_observer is not None:
                 try:
                     self._update_terminal_observer.reconcile()
