@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api/client'
 import type { UpdateStatus } from '../api/types'
 import AppIcon from '../components/AppIcon.vue'
@@ -8,6 +8,41 @@ import { formatDateTime } from '../utils/display'
 
 const update = ref<UpdateStatus | null>(null)
 const loading = ref(false)
+const installing = ref(false)
+const reconnecting = ref(false)
+let pollTimer: number | undefined
+
+const activeStatuses = new Set([
+  'checking', 'available', 'pulling', 'draining', 'handoff',
+  'snapshotting', 'switching', 'verifying', 'rolling_back',
+])
+
+const operationPresentation = computed(() => {
+  const operation = update.value?.operation
+  if (!operation) return null
+  const labels: Record<string, string> = {
+    pulling: '正在拉取并校验镜像',
+    draining: '正在等待现有任务结束',
+    handoff: '正在移交更新控制权',
+    snapshotting: '正在创建数据快照',
+    switching: '正在切换容器',
+    verifying: '正在验证新版本',
+    rolling_back: '新版本异常，正在自动回滚',
+    success: '更新成功',
+    failed: '更新失败',
+    rolled_back: '已恢复到更新前版本',
+    rollback_failed: '自动回滚失败，需要人工处理',
+    cancelled: '更新已取消',
+  }
+  const active = activeStatuses.has(operation.status)
+  return {
+    active,
+    label: labels[operation.status] ?? operation.status,
+    type: active ? 'warning' as const
+      : operation.status === 'success' ? 'success' as const
+        : operation.status === 'rolled_back' ? 'info' as const : 'error' as const,
+  }
+})
 
 const statusPresentation = computed(() => {
   if (!update.value) return { label: '读取中', type: 'info' as const }
@@ -33,12 +68,31 @@ async function loadStatus() {
   try {
     const status = await api<UpdateStatus>('/system/update')
     update.value = status
+    reconnecting.value = false
     if (status.status === 'not_checked') await checkForUpdates(false)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '版本信息加载失败')
   } finally {
     loading.value = false
+    schedulePoll()
   }
+}
+
+async function pollStatus() {
+  try {
+    update.value = await api<UpdateStatus>('/system/update')
+    reconnecting.value = false
+  } catch {
+    reconnecting.value = true
+  } finally {
+    schedulePoll()
+  }
+}
+
+function schedulePoll() {
+  if (pollTimer) window.clearTimeout(pollTimer)
+  const shouldPoll = reconnecting.value || operationPresentation.value?.active
+  if (shouldPoll) pollTimer = window.setTimeout(pollStatus, 3000)
 }
 
 async function checkForUpdates(showSuccess = true) {
@@ -69,7 +123,41 @@ async function copyPullCommand() {
   }
 }
 
+async function installUpdate() {
+  const target = update.value?.latest_release?.tag_name
+  if (!target || !update.value?.install_supported) return
+  try {
+    await ElMessageBox.confirm(
+      `将更新到 ${target}。更新期间页面会短暂断开；新容器不健康时会自动回滚。请确认已备份 /data。`,
+      '实验性一键更新',
+      {
+        confirmButtonText: '确认更新',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  installing.value = true
+  try {
+    update.value = await api<UpdateStatus>('/system/update/install', {
+      method: 'POST',
+      body: JSON.stringify({ target_version: target }),
+    })
+    ElMessage.success('更新已启动，容器切换期间页面会自动重连')
+    schedulePoll()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '无法启动更新')
+  } finally {
+    installing.value = false
+  }
+}
+
 onMounted(loadStatus)
+onBeforeUnmount(() => {
+  if (pollTimer) window.clearTimeout(pollTimer)
+})
 </script>
 
 <template>
@@ -92,6 +180,25 @@ onMounted(loadStatus)
       :title="update.stale ? '版本检查暂时失败，以下为上次成功结果' : '暂时无法检查新版本'"
       :description="update.error_message"
       type="warning"
+      :closable="false"
+      show-icon
+      class="section-gap"
+    />
+    <el-alert
+      v-if="reconnecting"
+      title="容器正在切换，等待 MediaSync 恢复连接"
+      description="页面会每 3 秒自动重试，无需手动刷新。"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="section-gap"
+    />
+    <el-alert
+      v-if="operationPresentation"
+      :title="operationPresentation.label"
+      :description="update?.operation?.error_message
+        || `目标版本：${update?.operation?.target_version ?? '等待确认'}`"
+      :type="operationPresentation.type"
       :closable="false"
       show-icon
       class="section-gap"
@@ -162,18 +269,29 @@ onMounted(loadStatus)
           <div class="card-heading">
             <div>
               <h2>容器升级指引</h2>
-              <p>现阶段请通过 NAS 容器管理器完成升级</p>
+              <p>Docker 环境就绪时可以一键更新，也可以继续手动升级</p>
             </div>
-            <el-tag type="info" effect="plain">手动升级</el-tag>
+            <el-tag :type="update?.install_supported ? 'warning' : 'info'" effect="plain">
+              {{ update?.install_supported ? '实验性一键更新' : '手动升级' }}
+            </el-tag>
           </div>
         </template>
         <el-alert
-          title="一键安装尚未启用"
+          :title="update?.install_supported ? '可以安装检测到的新版本' : '当前使用手动升级'"
           :description="update?.install_unavailable_reason"
-          type="info"
+          :type="update?.install_supported ? 'warning' : 'info'"
           :closable="false"
           show-icon
         />
+        <div v-if="update?.install_supported" class="install-action">
+          <div>
+            <strong>更新到 {{ update.latest_release?.tag_name }}</strong>
+            <p>将使用精确镜像摘要，切换失败时自动恢复旧容器。</p>
+          </div>
+          <el-button type="primary" :loading="installing" @click="installUpdate">
+            <AppIcon name="refresh" :size="16" />立即更新
+          </el-button>
+        </div>
         <ol class="upgrade-steps">
           <li><span>1</span><div><strong>拉取新镜像</strong><p>使用下方官方镜像标签，避免来源不明的镜像。</p></div></li>
           <li><span>2</span><div><strong>停止并重建容器</strong><p>保持原有环境变量、端口映射和网络设置。</p></div></li>
@@ -210,9 +328,11 @@ onMounted(loadStatus)
           </el-tag>
         </div>
         <div class="capability-row">
-          <span class="capability-state"><AppIcon name="refresh" :size="17" /></span>
-          <div><strong>界面一键更新</strong><p>将在后续独立阶段实现，并提供失败回滚保护。</p></div>
-          <el-tag type="info" effect="light">规划中</el-tag>
+          <span class="capability-state" :class="{ success: update?.install_supported }"><AppIcon name="refresh" :size="17" /></span>
+          <div><strong>界面一键更新</strong><p>{{ update?.install_supported ? '已就绪；当前为实验性功能。' : update?.install_unavailable_reason }}</p></div>
+          <el-tag :type="update?.install_supported ? 'warning' : 'info'" effect="light">
+            {{ update?.install_supported ? '实验性' : '不可用' }}
+          </el-tag>
         </div>
       </el-card>
     </div>
@@ -250,6 +370,10 @@ onMounted(loadStatus)
 .card-heading h2 { margin: 0 0 4px; color: #101828; font-size: 16px; }
 .card-heading p { margin: 0; color: #98a2b3; font-size: 11px; }
 .upgrade-steps { padding: 6px 0; margin: 17px 0; list-style: none; }
+.install-action { margin: 17px 0 4px; padding: 15px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border: 1px solid #f5c451; border-radius: 12px; background: #fffaeb; }
+.install-action strong { color: #7a2e0e; font-size: 13px; }
+.install-action p { margin: 5px 0 0; color: #b54708; font-size: 11px; line-height: 1.55; }
+.install-action .el-button { flex: none; }
 .upgrade-steps li { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; }
 .upgrade-steps li > span { width: 25px; height: 25px; display: grid; place-items: center; flex: none; color: #4338ca; border-radius: 8px; background: #eef2ff; font-size: 11px; font-weight: 700; }
 .upgrade-steps strong, .upgrade-steps p { display: block; }
@@ -272,5 +396,6 @@ onMounted(loadStatus)
   .version-card :deep(.el-card__body) { min-height: 230px; }
   .capability-row { grid-template-columns: 36px minmax(0, 1fr); }
   .capability-row .el-tag { grid-column: 2; justify-self: start; }
+  .install-action { align-items: stretch; flex-direction: column; }
 }
 </style>

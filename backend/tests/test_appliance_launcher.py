@@ -208,6 +208,12 @@ def test_launcher_runs_barriers_then_starts_processes_in_contract_order(
             events.append("reconcile:update")
             return False
 
+    class ExitedUpdaterObserver:
+        @staticmethod
+        def observe() -> tuple[str, ...]:
+            events.append("observe:exited-updater")
+            return ()
+
     launcher = ApplianceLauncher(
         data_directory=tmp_path,
         environment=appliance_environment(),
@@ -219,12 +225,13 @@ def test_launcher_runs_barriers_then_starts_processes_in_contract_order(
         health_socket_path=short_socket_path(),
         candidate_evidence_observer=EvidenceObserver(),
         update_terminal_observer=TerminalObserver(),
+        exited_updater_observer=ExitedUpdaterObserver(),
     )
 
     exit_code = launcher.run(stop=stop, install_signal_handlers=False)
 
     assert exit_code == 0
-    assert events[:10] == [
+    assert events[:11] == [
         "barrier:migration",
         "barrier:update-reconciliation",
         "barrier:reconciliation",
@@ -234,9 +241,10 @@ def test_launcher_runs_barriers_then_starts_processes_in_contract_order(
         "start:scheduler",
         "start:worker",
         "observe:candidate",
+        "observe:exited-updater",
         "reconcile:update",
     ]
-    assert events[10] == "terminate:nginx"
+    assert events[11] == "terminate:nginx"
     assert [event for event in events if event.startswith("terminate:")] == [
         "terminate:nginx",
         "terminate:scheduler",

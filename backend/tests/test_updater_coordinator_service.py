@@ -13,6 +13,7 @@ from app.services.update_snapshot_service import (
 )
 from app.services.updater_candidate_service import UpdaterCandidateService
 from app.services.updater_coordinator_service import (
+    ExitedUpdaterCleanupObserver,
     ExitedUpdaterCleanupService,
     UpdaterCoordinator,
 )
@@ -545,3 +546,25 @@ async def test_cleanup_removes_only_stopped_disarmed_strict_helper(
     assert removed == (COORDINATOR_ID,)
     assert engine.removed == [COORDINATOR_ID]
     assert "7" * 64 in engine.containers
+
+
+def test_cleanup_observer_caches_handoff_before_terminal_marker_cleanup(
+    tmp_path: Path,
+) -> None:
+    document = write_handoff(tmp_path)
+    pending = tmp_path / "update" / "pending.json"
+    UpdaterCandidateService(pending_path=pending).prepare(document)
+    engine = FakeEngine([helper_container(running=False, policy="no")])
+    observer = ExitedUpdaterCleanupObserver(
+        cleanup_service=ExitedUpdaterCleanupService(
+            engine=engine,
+            socket_path=SOCKET_PATH,
+        ),
+        data_directory=tmp_path,
+        pending_path=pending,
+    )
+
+    removed = observer.observe()
+
+    assert removed == (COORDINATOR_ID,)
+    assert engine.removed == [COORDINATOR_ID]

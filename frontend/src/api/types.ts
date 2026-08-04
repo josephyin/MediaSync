@@ -131,6 +131,8 @@ export interface UpdateOperationInfo {
   status: string
   source_version: string
   target_version: string | null
+  error_code: string | null
+  error_message: string | null
   created_at: string
   completed_at: string | null
 }

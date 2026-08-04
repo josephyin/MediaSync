@@ -38,8 +38,14 @@ class UpdateOperationInfo(BaseModel):
     status: str
     source_version: str
     target_version: str | None
+    error_code: str | None
+    error_message: str | None
     created_at: datetime
     completed_at: datetime | None
+
+
+class UpdateInstallRequest(BaseModel):
+    target_version: str
 
 
 class UpdateStatusRead(BaseModel):

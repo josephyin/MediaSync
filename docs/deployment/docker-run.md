@@ -144,6 +144,8 @@ docker start mediasync
 
 ## 6. 升级
 
+### 6.1 通过容器管理器手动升级
+
 候选版本建议使用精确标签，不要依赖浮动标签：
 
 ```bash
@@ -156,6 +158,29 @@ docker rm mediasync
 执行数据库迁移和旧任务对账，成功后才启动 Worker。
 
 升级前必须备份整个数据目录。新旧容器不得同时访问同一个 SQLite 数据库。
+
+### 6.2 实验性一键更新（可选）
+
+从支持该功能的版本开始，可以显式挂载 Docker Socket，在“系统设置”中检查并
+安装新版本：
+
+```bash
+-v /var/run/docker.sock:/var/run/docker.sock
+```
+
+完整示例是在原 `docker run` 命令中增加上面这一行。不要移除 `/data` 映射、
+`--restart unless-stopped` 或 `--stop-timeout 120`。
+
+Docker Socket 会让 MediaSync 获得接近宿主机 Docker 管理员的权限，因此：
+
+- 默认安装不挂载，手动升级始终可用；
+- 只允许可信的 MediaSync 官方镜像使用该 Socket；
+- 不要把管理页面直接暴露到公网；
+- 点击更新前仍应备份完整 `/data`；
+- 页面显示“无法连接 Docker daemon”时，先确认 Socket 已映射且容器有权访问。
+
+一键更新会拉取并校验精确镜像摘要，等待当前任务结束，再由临时助手切换容器；
+候选容器未通过健康验证时会自动回滚。容器切换期间页面会短暂断开并自动重连。
 
 ## 7. 从 v0.2.0-rc.2 Compose 升级
 
@@ -206,7 +231,8 @@ rc.3 没有新增数据库迁移，但回滚前仍必须保留完整备份。
 - 不要把 `9090` 管理端口直接映射到公网；
 - 公网访问必须使用 HTTPS 反向代理，并设置
   `SESSION_COOKIE_SECURE=true`；
-- 不需要特权模式、Docker Socket 或额外 Linux capabilities；
+- 默认不需要特权模式、Docker Socket 或额外 Linux capabilities；实验性一键
+  更新仅在用户显式挂载 Docker Socket 后启用；
 - `/data/config/runtime-secrets.json` 包含敏感信息，不要公开或单独遗失；
 - 私有接口 Provider 存在上游变更、限流和账号风控风险。
 

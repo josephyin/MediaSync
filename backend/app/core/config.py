@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     docker_capability_cache_seconds: int = Field(default=30, ge=5, le=300)
     docker_api_timeout_seconds: float = Field(default=3, ge=1, le=10)
     docker_image_pull_timeout_seconds: float = Field(default=600, ge=30, le=3600)
+    update_drain_timeout_seconds: float = Field(default=300, ge=30, le=1800)
+    update_drain_poll_seconds: float = Field(default=2, ge=0.5, le=30)
     update_image_registry: Literal["dockerhub", "ghcr"] = "dockerhub"
     update_registry_timeout_seconds: float = Field(default=15, ge=3, le=60)
     update_pending_path: str = "/data/update/pending.json"
