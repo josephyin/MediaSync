@@ -1,8 +1,8 @@
 # 群晖 DSM Container Manager 安装
 
 本文说明如何在群晖 DSM 7 的 Container Manager 中安装 MediaSync。群晖不会
-根据镜像声明自动创建宿主机文件夹映射，因此创建容器时必须手工添加 `/data`
-映射。
+根据镜像声明自动创建宿主机文件映射，因此创建容器时必须手工添加 `/data`，
+并按官方默认配置确认 Docker Socket 映射。
 
 ## 1. 准备数据目录
 
@@ -41,13 +41,14 @@ josephyjq/mediasync
 |---:|---:|---|
 | `9090` | `9090` | TCP |
 
-## 4. 必须添加存储映射
+## 4. 添加存储映射
 
 在“存储空间设置”中点击“添加文件夹”，手工配置：
 
 | 群晖文件夹 | 装载路径 | 权限 |
 |---|---|---|
 | `/volume1/docker/mediasync` | `/data` | 读写 |
+| `/var/run/docker.sock` | `/var/run/docker.sock` | 读写 |
 
 镜像虽然声明了容器路径 `/data`，但群晖创建界面不会自动带出宿主机文件夹。
 如果跳过这一步，Docker 会创建随机名称的匿名卷；容器可以启动，但重建时不会
@@ -57,9 +58,15 @@ josephyjq/mediasync
 
 ```text
 /volume1/docker/mediasync → /data
+/var/run/docker.sock → /var/run/docker.sock
 ```
 
 不要把 `/data` 映射为只读，也不要在删除容器时同时删除对应数据。
+
+Docker Socket 映射等同于授予 MediaSync 宿主机 Docker 管理员权限。它是官方
+单容器新安装的推荐默认值，但群晖不会仅根据 Docker Hub 镜像自动带出该绑定，
+必须由用户手工添加并确认。只使用可信官方镜像，不要把管理端口暴露到公网。
+不需要一键更新时可以省略 Socket 映射，其他功能不受影响。
 
 ## 5. 环境变量
 
@@ -99,16 +106,17 @@ NAS 健康检查修复的新版本。
 
 ## 7. 升级
 
-默认继续使用 Container Manager 手动升级。支持一键更新的版本也可编辑容器，
-在“存储空间设置”中显式增加文件映射：
+按第 4 节配置 Docker Socket 后，可以在 MediaSync“系统设置”中使用实验性一键
+更新。页面会等待任务结束、校验精确镜像并在候选失败时自动回滚。
+
+也可以继续使用 Container Manager 手动升级。不需要一键更新时删除：
 
 | 群晖文件 | 装载路径 | 权限 |
 |---|---|---|
 | `/var/run/docker.sock` | `/var/run/docker.sock` | 读写 |
 
-重建容器后，在 MediaSync“系统设置”中应看到“实验性一键更新”。Docker Socket
-等同于授予 MediaSync 宿主机 Docker 管理权限，因此默认不要映射，只允许可信
-官方镜像使用，也不要把管理页面直接暴露到公网。更新前仍须备份完整 `/data`。
+删除 Socket 后，在 MediaSync“系统设置”中会显示手动升级指引。无论使用哪种
+方式，更新前都必须备份完整 `/data`。
 
 手动升级步骤：
 

@@ -1,8 +1,8 @@
 # Docker 单容器部署
 
 本文面向希望直接从 Docker Hub 拉取镜像并运行 MediaSync 的普通用户。默认
-Appliance 模式只需要一个 Web 端口和一个持久化目录，不需要下载源码或编写
-Compose 文件。
+Appliance 模式使用一个 Web 端口、一个持久化目录和 Docker Socket，不需要下载
+源码或编写 Compose 文件。
 
 ## 1. 部署契约
 
@@ -45,6 +45,7 @@ docker run -d \
   --name mediasync \
   -p 9090:9090 \
   -v /volume1/docker/mediasync:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
   josephyjq/mediasync:v0.2.0-rc.10
@@ -66,6 +67,7 @@ docker run -d \
   --name mediasync \
   -p 9090:9090 \
   -v /volume1/docker/mediasync:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -e ADMIN_PASSWORD='请替换为强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
@@ -74,6 +76,18 @@ docker run -d \
 
 显式密码不会写入日志。Shell 历史可能记录命令，介意时请使用环境变量文件或
 NAS 的环境变量表单。
+
+项目同时提供单容器模板 `compose.appliance.yml`。下载该文件后可以通过环境变量
+指定数据目录和精确镜像：
+
+```bash
+MEDIASYNC_DATA_PATH=/volume1/docker/mediasync \
+MEDIASYNC_IMAGE=josephyjq/mediasync:v0.2.0-rc.10 \
+docker compose -f compose.appliance.yml up -d
+```
+
+该模板与上面的默认 `docker run` 命令一致，会挂载 Docker Socket。它不同于面向
+高级多进程部署的 `docker-compose.yml`；内置一键更新目前只支持单容器模板。
 
 ## 3. 常用配置
 
@@ -159,21 +173,21 @@ docker rm mediasync
 
 升级前必须备份整个数据目录。新旧容器不得同时访问同一个 SQLite 数据库。
 
-### 6.2 实验性一键更新（可选）
+### 6.2 实验性一键更新
 
-从支持该功能的版本开始，可以显式挂载 Docker Socket，在“系统设置”中检查并
+官方单容器新安装命令默认挂载 Docker Socket，因此在“系统设置”中可以检查并
 安装新版本：
 
 ```bash
 -v /var/run/docker.sock:/var/run/docker.sock
 ```
 
-完整示例是在原 `docker run` 命令中增加上面这一行。不要移除 `/data` 映射、
-`--restart unless-stopped` 或 `--stop-timeout 120`。
+不要移除 `/data` 映射、`--restart unless-stopped` 或
+`--stop-timeout 120`。
 
 Docker Socket 会让 MediaSync 获得接近宿主机 Docker 管理员的权限，因此：
 
-- 默认安装不挂载，手动升级始终可用；
+- 默认安装会挂载 Socket，安装前必须知晓这等同于 Docker 管理员权限；
 - 只允许可信的 MediaSync 官方镜像使用该 Socket；
 - 不要把管理页面直接暴露到公网；
 - 点击更新前仍应备份完整 `/data`；
@@ -181,6 +195,9 @@ Docker Socket 会让 MediaSync 获得接近宿主机 Docker 管理员的权限�
 
 一键更新会拉取并校验精确镜像摘要，等待当前任务结束，再由临时助手切换容器；
 候选容器未通过健康验证时会自动回滚。容器切换期间页面会短暂断开并自动重连。
+
+如果更重视最小权限，可以从启动命令中删除 Docker Socket 映射。订阅、扫描、
+转存和日志功能不受影响，但一键更新会关闭，需要继续通过容器管理器手动升级。
 
 ## 7. 从 v0.2.0-rc.2 Compose 升级
 
@@ -203,6 +220,7 @@ docker run -d \
   --name mediasync \
   -p 9090:9090 \
   -v /volume1/docker/mediasync:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -e SECRET_KEY='rc.2 原值' \
   -e CREDENTIAL_ENCRYPTION_KEY='rc.2 原值' \
   -e ADMIN_PASSWORD='rc.2 原值' \
@@ -231,8 +249,8 @@ rc.3 没有新增数据库迁移，但回滚前仍必须保留完整备份。
 - 不要把 `9090` 管理端口直接映射到公网；
 - 公网访问必须使用 HTTPS 反向代理，并设置
   `SESSION_COOKIE_SECURE=true`；
-- 默认不需要特权模式、Docker Socket 或额外 Linux capabilities；实验性一键
-  更新仅在用户显式挂载 Docker Socket 后启用；
+- 官方单容器新安装默认挂载 Docker Socket，它等同于 Docker 管理员权限；不需要
+  一键更新时应删除该映射，MediaSync 不需要特权模式或额外 Linux capabilities；
 - `/data/config/runtime-secrets.json` 包含敏感信息，不要公开或单独遗失；
 - 私有接口 Provider 存在上游变更、限流和账号风控风险。
 

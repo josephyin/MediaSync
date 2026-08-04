@@ -116,6 +116,33 @@ jobs:
           jq -e '.services["mediasync-scheduler"].deploy.replicas == 1' \
             "${RUNNER_TEMP}/mediasync-compose.json"
 
+      - name: 验证单容器默认安装契约
+        run: |
+          MEDIASYNC_DATA_PATH="${RUNNER_TEMP}/mediasync-appliance-data" \
+            docker compose -f compose.appliance.yml config --format json \
+            > "${RUNNER_TEMP}/mediasync-appliance-compose.json"
+          jq -e '.services | keys == ["mediasync"]' \
+            "${RUNNER_TEMP}/mediasync-appliance-compose.json"
+          jq -e '.services.mediasync.ports == [{
+            "mode": "ingress",
+            "target": 9090,
+            "published": "9090",
+            "protocol": "tcp"
+          }]' "${RUNNER_TEMP}/mediasync-appliance-compose.json"
+          jq -e '.services.mediasync.volumes | any(
+            .type == "bind"
+            and .target == "/data"
+          )' "${RUNNER_TEMP}/mediasync-appliance-compose.json"
+          jq -e '.services.mediasync.volumes | any(
+            .type == "bind"
+            and .source == "/var/run/docker.sock"
+            and .target == "/var/run/docker.sock"
+          )' "${RUNNER_TEMP}/mediasync-appliance-compose.json"
+          jq -e '.services.mediasync.restart == "unless-stopped"' \
+            "${RUNNER_TEMP}/mediasync-appliance-compose.json"
+          jq -e '.services.mediasync.stop_grace_period == "2m0s"' \
+            "${RUNNER_TEMP}/mediasync-appliance-compose.json"
+
       - name: 构建 MediaSync 单镜像
         run: docker build --tag "${CI_IMAGE}" .
 

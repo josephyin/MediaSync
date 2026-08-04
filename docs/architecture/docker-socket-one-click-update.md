@@ -6,6 +6,11 @@
 - 相关决策：[ADR-0005：Docker Socket 可选一键镜像升级](adr/ADR-0005-optional-docker-socket-updater.md)
 - 取代：无
 
+> 默认启用策略已由
+> [ADR-0009：官方单容器安装默认配置 Docker Socket](adr/ADR-0009-default-docker-socket-for-appliance.md)
+> 取代。本文件中“默认关闭、显式启用”的历史描述不再约束新安装；镜像不能自行
+> 绑定宿主机路径、能力探测、自身容器限制、任务排空、验证和回滚契约继续有效。
+
 ## 1. 背景
 
 MediaSync 默认单容器 Appliance 已把普通 NAS 用户的安装流程简化为：
