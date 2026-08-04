@@ -2,6 +2,45 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.11] - 2026-08-04
+
+这是 v0.2 可靠性基础的第十一个候选版本，在 rc.10 Updater 恢复地基上开放
+实验性 Web 一键镜像更新，并让官方单容器新安装默认配置 Docker Socket。
+
+### 新增
+
+- 系统设置增加实验性一键更新按钮、管理员安装 API、执行状态和失败原因展示。
+- 容器切换期间页面每 3 秒自动重连，恢复后继续显示最终更新结果。
+- 新增 `compose.appliance.yml`，提供一个端口、一个数据目录和默认 Docker Socket
+  的受维护单容器模板。
+- Docker Run、Docker Hub、飞牛和群晖安装说明统一采用新的单容器默认契约。
+
+### 可靠性
+
+- 安装目标必须匹配最近一次版本检查结果，并锁定官方镜像的精确 digest。
+- 更新前停止新任务领取并等待活动任务排空，再由持久 updater helper 接管切换。
+- Updater v2 进度会同步到更新操作记录，候选容器失败时继续使用 rc.10 已验证的
+  快照恢复和自动回滚路径。
+- Launcher 会在终态对账前保留 helper 身份，并清理已经停止且解除重启策略的
+  临时 helper。
+- CI 新增单容器 Compose 端口、数据绑定、Socket、重启策略和 120 秒停止宽限
+  契约验证。
+
+### 安全与兼容性
+
+- 官方单容器新安装默认映射
+  `/var/run/docker.sock:/var/run/docker.sock`。Docker Socket 等同于宿主机 Docker
+  管理员权限，只应交给可信官方镜像，管理端口不得直接暴露到公网。
+- Docker 镜像无法自行绑定宿主机路径。群晖和飞牛从镜像创建容器时仍要求用户在
+  图形界面手工确认 Socket 映射。
+- 不需要一键更新时可以删除 Socket 映射；订阅、扫描、转存、日志和手动升级不受
+  影响。
+- 已有 rc.10 容器不会在升级镜像后自动获得 Socket。需要编辑或重建容器，并保留
+  原 `/data`、端口、环境变量、重启策略和 120 秒停止宽限。
+- 高级多容器 Compose 暂不支持内置一键更新，不得给所有服务挂载 Docker Socket。
+- 本版本没有新增数据库迁移，仍使用 `0007_update_operations`；升级前必须停止
+  容器并完整备份 `/data`。
+
 ## [0.2.0-rc.10] - 2026-08-03
 
 这是 v0.2 可靠性基础的第十个候选版本，提供一键镜像更新的只读检查界面与
@@ -275,6 +314,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.11]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.11
 [0.2.0-rc.10]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.10
 [0.2.0-rc.9]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.9
 [0.2.0-rc.8]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.8
