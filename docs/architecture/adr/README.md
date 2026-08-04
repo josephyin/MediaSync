@@ -95,7 +95,8 @@ ADR-0002-task-execution-model.md
 | [ADR-0002](ADR-0002-task-execution-model.md) | 任务执行模型 | 已接受 |
 | [ADR-0003](ADR-0003-single-release-image.md) | 单一发布镜像，多进程容器拓扑 | 已由 ADR-0004 取代 |
 | [ADR-0004](ADR-0004-single-container-appliance.md) | 默认单容器 Appliance，保留多进程职责边界 | 已接受 |
-| [ADR-0005](ADR-0005-optional-docker-socket-updater.md) | Docker Socket 可选一键镜像升级 | 已接受 |
+| [ADR-0005](ADR-0005-optional-docker-socket-updater.md) | Docker Socket 可选一键镜像升级 | 已由 ADR-0009 取代 |
 | [ADR-0006](ADR-0006-updater-two-phase-commit.md) | Updater 两阶段提交与重启策略 Fencing | 已接受 |
 | [ADR-0007](ADR-0007-updater-rollback-reconciliation.md) | Updater 回滚由旧 Appliance 提交终态 | 已接受 |
 | [ADR-0008](ADR-0008-durable-updater-recovery-coordinator.md) | Updater 使用持久协调器与可收敛检查点 | 已接受 |
+| [ADR-0009](ADR-0009-default-docker-socket-for-appliance.md) | 官方单容器安装默认配置 Docker Socket | 提议中 |
