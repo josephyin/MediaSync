@@ -14,6 +14,12 @@ export class ApiError extends Error {
   }
 }
 
+let unauthorizedHandler: (() => void) | undefined
+
+export function setUnauthorizedHandler(handler: () => void): void {
+  unauthorizedHandler = handler
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
@@ -23,6 +29,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: 'include',
   })
   if (!response.ok) {
+    if (response.status === 401) unauthorizedHandler?.()
     let message = `Request failed (${response.status})`
     try {
       const body = await response.json()

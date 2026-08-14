@@ -1,10 +1,11 @@
 {
   "name": "mediasync-frontend",
   "private": true,
-  "version": "0.2.0-rc.11",
+  "version": "0.2.0-rc.12",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "test": "vitest run",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },
@@ -17,6 +18,7 @@
     "@vitejs/plugin-vue": "^5.2.3",
     "typescript": "~5.7.3",
     "vite": "^6.2.0",
+    "vitest": "^3.2.7",
     "vue-tsc": "^2.2.8"
   }
 }
