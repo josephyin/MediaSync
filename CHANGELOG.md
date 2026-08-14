@@ -2,6 +2,29 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.12] - 2026-08-14
+
+这是 v0.2 稳定性观察期的修复候选版本，修复管理员 Web 会话在页面停留期间
+过期后，界面不会自动返回登录页的问题。
+
+### 修复
+
+- 统一 API 请求层在收到 `401 Unauthorized` 时立即清理前端登录状态，并自动
+  跳转到登录页，无需手工刷新浏览器。
+- 登录跳转会保留原站内页面地址，重新登录后返回会话过期前所在页面。
+- 登录后的返回地址仅允许站内绝对路径，避免把外部地址作为跳转目标。
+
+### 验证
+
+- 增加 API 认证回归测试，覆盖 `401` 触发退出和其他错误不误触发退出。
+- 前端生产构建继续通过 TypeScript 与 Vite 检查。
+
+### 兼容性
+
+- 本版本不包含后端 API、数据库模型、迁移、Task Engine 或 Provider 行为变化。
+- 从 rc.11 升级时可以直接复用原有 `/data`、端口、环境变量和 Docker Socket
+  配置；升级前仍应完整备份 `/data`。
+
 ## [0.2.0-rc.11] - 2026-08-04
 
 这是 v0.2 可靠性基础的第十一个候选版本，在 rc.10 Updater 恢复地基上开放
@@ -314,6 +337,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.12]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.12
 [0.2.0-rc.11]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.11
 [0.2.0-rc.10]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.10
 [0.2.0-rc.9]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.9

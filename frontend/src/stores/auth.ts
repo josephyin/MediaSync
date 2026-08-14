@@ -14,6 +14,13 @@ export const authState = reactive({
   passwordChangeSupported: false,
 })
 
+export function clearAuthState(): void {
+  authState.checked = true
+  authState.authenticated = false
+  authState.username = ''
+  authState.passwordChangeSupported = false
+}
+
 export async function checkAuth(): Promise<boolean> {
   const result = await api<AuthStatus>('/auth/status')
   authState.checked = true
@@ -35,9 +42,7 @@ export async function login(username: string, password: string): Promise<void> {
 
 export async function logout(): Promise<void> {
   await api('/auth/logout', { method: 'POST' })
-  authState.authenticated = false
-  authState.username = ''
-  authState.passwordChangeSupported = false
+  clearAuthState()
 }
 
 export async function changePassword(
@@ -53,7 +58,5 @@ export async function changePassword(
       confirm_password: confirmPassword,
     }),
   })
-  authState.authenticated = false
-  authState.username = ''
-  authState.passwordChangeSupported = false
+  clearAuthState()
 }
