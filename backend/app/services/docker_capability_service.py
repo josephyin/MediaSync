@@ -448,7 +448,8 @@ class DockerCapabilityService:
         candidates = [
             item
             for item in summaries
-            if has_official_source(item.get("Labels"))
+            if item.get("State") == "running"
+            and has_official_source(item.get("Labels"))
             and summary_has_data_mount(item)
             and item.get("Command") == "python -m app.appliance"
         ]

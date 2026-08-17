@@ -41,6 +41,7 @@ def official_summary(container_id: str = CONTAINER_ID) -> dict[str, Any]:
     container = official_container(container_id)
     return {
         "Id": container_id,
+        "State": "running",
         "Command": "python -m app.appliance",
         "Labels": container["Config"]["Labels"],
         "Mounts": container["Mounts"],
@@ -185,6 +186,24 @@ async def test_resolver_returns_full_id_for_custom_hostname() -> None:
     assert container["Id"] == CONTAINER_ID
     assert engine.inspect_calls == [CONTAINER_ID]
     assert engine.list_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_resolver_ignores_stopped_previous_appliance() -> None:
+    stopped = official_summary(OTHER_CONTAINER_ID)
+    stopped["State"] = "exited"
+    engine = FakeDockerEngine(
+        containers={CONTAINER_ID: official_container()},
+        summaries=[official_summary(), stopped],
+    )
+
+    container = await service(
+        engine,
+        hostname="mediasync-nas",
+    ).resolve_current_container()
+
+    assert container["Id"] == CONTAINER_ID
+    assert engine.inspect_calls == [CONTAINER_ID]
 
 
 @pytest.mark.asyncio
