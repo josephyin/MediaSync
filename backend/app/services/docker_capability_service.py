@@ -33,6 +33,12 @@ class DockerEngineError(RuntimeError):
     pass
 
 
+class DockerContainerResolutionError(DockerEngineError):
+    def __init__(self, reason_code: str, message: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
 class DockerEngine(Protocol):
     async def ping(self) -> None: ...
 
@@ -393,7 +399,15 @@ class DockerCapabilityService:
             )
 
         try:
-            container = await self._identify_container()
+            await self.resolve_current_container()
+        except DockerContainerResolutionError as exc:
+            logger.warning("docker_capability_probe_failed reason=%s", exc.reason_code)
+            return self._result(
+                exc.reason_code,
+                str(exc),
+                socket_available=True,
+                engine_available=True,
+            )
         except DockerEngineError as exc:
             logger.warning(
                 "docker_capability_probe_failed reason=container_not_identified"
@@ -405,17 +419,6 @@ class DockerCapabilityService:
                 engine_available=True,
             )
 
-        rejection = validate_current_container(container)
-        if rejection is not None:
-            reason_code, message = rejection
-            logger.warning("docker_capability_probe_failed reason=%s", reason_code)
-            return self._result(
-                reason_code,
-                message,
-                socket_available=True,
-                engine_available=True,
-            )
-
         return self._result(
             "ready",
             "Docker 环境与当前 MediaSync 容器已安全识别",
@@ -423,6 +426,13 @@ class DockerCapabilityService:
             engine_available=True,
             container_identified=True,
         )
+
+    async def resolve_current_container(self) -> dict[str, Any]:
+        container = await self._identify_container()
+        rejection = validate_current_container(container)
+        if rejection is not None:
+            raise DockerContainerResolutionError(*rejection)
+        return container
 
     async def _identify_container(self) -> dict[str, Any]:
         if self.explicit_container_id:

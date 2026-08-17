@@ -12,7 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -91,6 +91,24 @@ jobs:
         if: steps.dockerhub-description.outcome == 'failure'
         run: |
           echo "::warning::Docker Hub Overview 自动更新失败；镜像已经发布，请检查 Access Token 的仓库详情管理权限并手动同步说明。"
+
+      - name: 发布 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            exit 0
+          fi
+          release_args=(
+            "$GITHUB_REF_NAME"
+            --verify-tag
+            --title "MediaSync $GITHUB_REF_NAME"
+            --generate-notes
+          )
+          if [[ "$GITHUB_REF_NAME" == *"-rc."* ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}"
 
   mirror-existing:
     name: 同步 MediaSync 单镜像

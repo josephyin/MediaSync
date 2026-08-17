@@ -40,6 +40,15 @@ class FakeEngine:
         self.removed.append(container_id)
 
 
+class FakeContainerResolver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def resolve_current_container(self):
+        self.calls += 1
+        return {"Id": "c" * 64}
+
+
 class FakeHandoffService:
     def __init__(self, tmp_path: Path, *, fail: bool = False) -> None:
         self.path = tmp_path / "operation.handoff.json"
@@ -65,13 +74,14 @@ def build_service(
     factory: sessionmaker[Session],
     engine: FakeEngine,
     handoff: FakeHandoffService,
+    resolver: FakeContainerResolver | None = None,
 ) -> UpdateInstallService:
     return UpdateInstallService(
         session_factory=factory,
         image_service=FakeImageService(),  # type: ignore[arg-type]
         engine=engine,  # type: ignore[arg-type]
         handoff_service=handoff,  # type: ignore[arg-type]
-        current_container_id=lambda: "c" * 64,
+        container_resolver=resolver or FakeContainerResolver(),
         registry_key="dockerhub",
         drain_timeout_seconds=1,
         drain_poll_seconds=0.01,
@@ -82,7 +92,8 @@ async def test_install_prepares_handoff_after_drain_and_starts_helper(tmp_path: 
     factory = session_factory(tmp_path)
     engine = FakeEngine()
     handoff = FakeHandoffService(tmp_path)
-    service = build_service(tmp_path, factory, engine, handoff)
+    resolver = FakeContainerResolver()
+    service = build_service(tmp_path, factory, engine, handoff, resolver)
     with factory() as session:
         operation = service.begin(
             session,
@@ -100,6 +111,7 @@ async def test_install_prepares_handoff_after_drain_and_starts_helper(tmp_path: 
         assert stored.target_digest == TARGET.digest
     assert engine.started == ["d" * 64]
     assert handoff.path.exists()
+    assert resolver.calls == 1
 
 
 async def test_install_failure_before_helper_start_is_terminal_and_retryable(

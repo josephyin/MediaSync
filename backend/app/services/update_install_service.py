@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import socket
-from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, Protocol
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import Task, UpdateOperation
 from app.repositories import UpdateOperationRepository
-from app.services.docker_capability_service import DockerEngineClient
+from app.services.docker_capability_service import (
+    DockerEngineClient,
+    get_docker_capability_service,
+)
 from app.services.image_target_service import ImageTargetService, get_image_target_service
 from app.services.updater_handoff_service import (
     UpdaterHandoffService,
@@ -26,6 +28,10 @@ class UpdateInstallError(RuntimeError):
     pass
 
 
+class CurrentContainerResolver(Protocol):
+    async def resolve_current_container(self) -> dict[str, Any]: ...
+
+
 class UpdateInstallService:
     def __init__(
         self,
@@ -34,7 +40,7 @@ class UpdateInstallService:
         image_service: ImageTargetService,
         engine: DockerEngineClient,
         handoff_service: UpdaterHandoffService,
-        current_container_id: Callable[[], str],
+        container_resolver: CurrentContainerResolver,
         registry_key: str,
         drain_timeout_seconds: float,
         drain_poll_seconds: float,
@@ -43,7 +49,7 @@ class UpdateInstallService:
         self._image_service = image_service
         self._engine = engine
         self._handoff_service = handoff_service
-        self._current_container_id = current_container_id
+        self._container_resolver = container_resolver
         self._registry_key = registry_key
         self._drain_timeout_seconds = drain_timeout_seconds
         self._drain_poll_seconds = drain_poll_seconds
@@ -83,7 +89,7 @@ class UpdateInstallService:
                 repository.transition_active(operation, status="draining")
 
             await self._wait_until_drained()
-            current = await self._engine.inspect_container(self._current_container_id())
+            current = await self._container_resolver.resolve_current_container()
             helper_id, handoff_path = await self._handoff_service.prepare(
                 operation_id=operation_id,
                 current_container=current,
@@ -191,7 +197,7 @@ def get_update_install_service() -> UpdateInstallService:
             store=UpdaterHandoffStore(directory=str(operations_directory)),
             socket_path=settings.docker_socket_path,
         ),
-        current_container_id=lambda: settings.docker_container_id or socket.gethostname(),
+        container_resolver=get_docker_capability_service(),
         registry_key=settings.update_image_registry,
         drain_timeout_seconds=settings.update_drain_timeout_seconds,
         drain_poll_seconds=settings.update_drain_poll_seconds,

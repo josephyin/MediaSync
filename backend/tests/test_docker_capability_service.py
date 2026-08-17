@@ -171,6 +171,23 @@ async def test_unique_official_fallback_candidate_is_inspected() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolver_returns_full_id_for_custom_hostname() -> None:
+    engine = FakeDockerEngine(
+        containers={CONTAINER_ID: official_container()},
+        summaries=[official_summary()],
+    )
+
+    container = await service(
+        engine,
+        hostname="mediasync-nas",
+    ).resolve_current_container()
+
+    assert container["Id"] == CONTAINER_ID
+    assert engine.inspect_calls == [CONTAINER_ID]
+    assert engine.list_calls == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "summaries",
     [
