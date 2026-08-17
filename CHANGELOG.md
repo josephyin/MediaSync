@@ -2,6 +2,32 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.14] - 2026-08-17
+
+这是 v0.2 稳定性观察期的 NAS 一键更新修复候选版本，解决飞牛、群晖等环境
+使用自定义容器 hostname 时，能力探测显示可更新但安装阶段失败的问题。
+
+### 修复
+
+- 更新安装流程复用能力探测的安全容器解析器；当 hostname 不是 Docker 容器 ID
+  时，通过官方 OCI 标签、`/data` 挂载和 Appliance 命令唯一解析当前容器，使用
+  Docker 返回的完整 64 位 ID 执行更新。
+- 保持原有安全边界：候选不唯一、非官方镜像、Compose 管理、缺少 `/data` 挂载
+  或非 Appliance 模式时仍拒绝一键更新。
+- 标签镜像发布成功后自动创建 GitHub Release，避免更新器只看到旧版本。
+
+### 验证
+
+- 增加自定义 NAS hostname 回归测试，覆盖解析完整容器 ID 后进入更新交接。
+- 继续执行后端全量测试、前端测试与生产构建、双架构镜像构建和公开镜像验证。
+
+### 升级说明
+
+- 已受此问题影响的 rc.11 需要在 NAS 容器管理器中手工重建到 rc.14 一次；必须
+  保留原端口、环境变量、Docker Socket 和 `/data` 映射。进入 rc.14 后，后续
+  一键更新会使用修正后的容器识别流程。
+- 本版本没有数据库迁移、Task Engine 或 Provider 行为变化。
+
 ## [0.2.0-rc.13] - 2026-08-17
 
 这是 v0.2 稳定性观察期的发布恢复候选版本，包含 rc.12 的 Web 会话过期跳转
@@ -361,6 +387,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.14]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.14
 [0.2.0-rc.13]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.13
 [0.2.0-rc.12]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.12
 [0.2.0-rc.11]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.11

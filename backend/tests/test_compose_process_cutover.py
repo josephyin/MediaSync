@@ -221,3 +221,12 @@ def test_single_image_keeps_appliance_and_explicit_nginx_contracts() -> None:
     assert "proxy_pass http://backend:8000;" not in nginx
     assert "proxy_pass http://127.0.0.1:8000;" in appliance_nginx
     assert "listen 9090;" in appliance_nginx
+
+
+def test_image_release_publishes_github_release_after_registry_push() -> None:
+    workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "release-images.yml").read_text()
+
+    assert "contents: write" in workflow
+    assert "gh release create" in workflow
+    assert "--prerelease" in workflow
+    assert workflow.index("构建并推送镜像") < workflow.index("发布 GitHub Release")
