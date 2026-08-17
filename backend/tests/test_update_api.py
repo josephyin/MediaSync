@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
@@ -187,3 +189,68 @@ def test_install_update_requires_exact_checked_target_and_runs_in_background(
         assert accepted.json()["operation"]["status"] == "pulling"
         assert len(fake_install.executed) == 1
         assert fake_install.executed[0][1] == "v0.3.0-rc.1"
+
+
+@pytest.mark.parametrize(
+    ("operation_status", "source", "target", "current", "expected"),
+    [
+        ("failed", "0.2.0-rc.11", "v0.2.0-rc.13", "0.2.0-rc.15", False),
+        ("failed", "0.2.0-rc.15", "v0.2.0-rc.16", "0.2.0-rc.15", True),
+        ("cancelled", "v0.2.0-rc.15", "v0.2.0-rc.16", "0.2.0-rc.15", True),
+        ("rolled_back", "0.2.0-rc.15", "v0.2.0-rc.16", "v0.2.0-rc.15", True),
+        ("success", "0.2.0-rc.15", "v0.2.0-rc.16", "0.2.0-rc.16", True),
+        ("success", "0.2.0-rc.14", "v0.2.0-rc.15", "0.2.0-rc.16", False),
+        ("rollback_failed", "0.2.0-rc.15", "v0.2.0-rc.16", "0.2.0-rc.16", True),
+        ("failed", "invalid", "v0.2.0-rc.16", "0.2.0-rc.15", False),
+    ],
+)
+def test_terminal_update_operation_only_matches_its_current_runtime(
+    operation_status: str,
+    source: str,
+    target: str | None,
+    current: str,
+    expected: bool,
+) -> None:
+    from app.api.v1.system import _terminal_operation_matches_current_version
+
+    assert _terminal_operation_matches_current_version(
+        status=operation_status,
+        source_version=source,
+        target_version=target,
+        current_version=current,
+    ) is expected
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_hides_terminal_failure_from_an_older_version(
+    monkeypatch,
+) -> None:
+    from app.api.v1 import system
+
+    class FakeRepository:
+        def __init__(self, _session) -> None:
+            pass
+
+        def get_active(self):
+            return None
+
+        def get_latest(self):
+            return SimpleNamespace(
+                status="failed",
+                source_version="0.2.0-rc.8",
+                target_version="v0.2.0-rc.9",
+            )
+
+    gate = SimpleNamespace(evaluate=lambda _session: SimpleNamespace(mode="normal"))
+    monkeypatch.setattr(system, "UpdateOperationRepository", FakeRepository)
+    monkeypatch.setattr(system, "build_update_execution_gate", lambda: gate)
+    monkeypatch.setattr(
+        system,
+        "get_docker_capability_service",
+        lambda: FakeDockerCapabilityService(),
+    )
+
+    result = await system._with_runtime_status(FakeUpdateCheckService._unchecked(), object())
+
+    assert result.current_version == "0.2.0-rc.9"
+    assert result.operation is None
