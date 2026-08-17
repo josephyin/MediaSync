@@ -2,6 +2,29 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.15] - 2026-08-17
+
+这是 rc.14 容器识别修复的边界补丁。实际公开镜像验证发现，NAS 保留已停止的
+旧 MediaSync 容器时，解析器会把历史容器也计入候选，导致无法唯一识别当前容器。
+
+### 修复
+
+- 自定义 hostname 的回退识别只在运行中的容器里选择当前官方 Appliance；已停止
+  的旧容器不再参与候选计数。
+- 同时存在多个运行中的官方 Appliance 时继续拒绝自动选择，保留安全边界。
+
+### 验证
+
+- 增加“一个运行容器加一个已停止历史容器”的回归测试。
+- 使用自定义 hostname、Docker Socket 和已停止旧容器执行公开镜像验证，确认
+  解析器返回当前运行容器的完整 64 位 ID。
+
+### 升级说明
+
+- rc.11 用户请直接手工重建到 rc.15，保留原端口、环境变量、Docker Socket 和
+  `/data` 映射；无需先安装 rc.14。
+- 本版本没有数据库迁移、Task Engine 或 Provider 行为变化。
+
 ## [0.2.0-rc.14] - 2026-08-17
 
 这是 v0.2 稳定性观察期的 NAS 一键更新修复候选版本，解决飞牛、群晖等环境
@@ -387,6 +410,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.15]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.15
 [0.2.0-rc.14]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.14
 [0.2.0-rc.13]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.13
 [0.2.0-rc.12]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.12
