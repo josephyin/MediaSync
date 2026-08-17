@@ -206,6 +206,10 @@ def test_single_image_keeps_appliance_and_explicit_nginx_contracts() -> None:
     )
     assert "alembic upgrade head && uvicorn" not in dockerfile
     assert "supervisord" not in dockerfile.lower()
+    assert (
+        "FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder"
+        in dockerfile
+    )
     assert "COPY --from=frontend-builder /build/dist /usr/share/nginx/html" in dockerfile
     assert "apt-get install --no-install-recommends --yes nginx" in dockerfile
     assert "VOLUME [\"/data\"]" in dockerfile

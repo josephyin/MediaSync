@@ -1,4 +1,6 @@
-FROM node:22-alpine AS frontend-builder
+# Frontend assets are architecture-independent. Build them on the runner's native
+# platform so multi-architecture releases do not execute npm under QEMU.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
 
 WORKDIR /build
 COPY frontend/package*.json ./

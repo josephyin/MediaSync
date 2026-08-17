@@ -2,6 +2,30 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.13] - 2026-08-17
+
+这是 v0.2 稳定性观察期的发布恢复候选版本，包含 rc.12 的 Web 会话过期跳转
+修复，并解决多架构镜像构建在 ARM64 前端依赖安装阶段挂起的问题。
+
+### 修复
+
+- 前端 builder 固定运行在 Buildx 的原生 `BUILDPLATFORM`；前端静态产物只构建
+  一次并复用于 AMD64/ARM64 最终镜像，不再通过 QEMU 执行 `npm ci`。
+- 发布 job 增加 30 分钟超时，构建异常时快速失败，避免占用 runner 达到 GitHub
+  默认六小时上限。
+
+### 验证
+
+- 单镜像契约测试锁定原生前端 builder，防止后续重新引入 QEMU 前端构建。
+- 继续执行前端测试、生产构建、后端全量测试和单镜像 CI 验证。
+
+### 发布说明
+
+- `v0.2.0-rc.12` 源码标签保持不可变；其首次镜像构建在 ARM64 `npm ci` 阶段
+  挂起并被 GitHub 取消，没有作为可用容器版本发布。
+- rc.13 不包含数据库模型、迁移、Task Engine 或 Provider 行为变化，可以直接
+  复用 rc.11 及更早版本的 `/data`。
+
 ## [0.2.0-rc.12] - 2026-08-14
 
 这是 v0.2 稳定性观察期的修复候选版本，修复管理员 Web 会话在页面停留期间
@@ -337,6 +361,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.13]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.13
 [0.2.0-rc.12]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.12
 [0.2.0-rc.11]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.11
 [0.2.0-rc.10]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.10
