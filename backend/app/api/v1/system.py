@@ -10,7 +10,7 @@ from app.providers import list_provider_types
 from app.repositories import ActiveUpdateOperationConflictError, UpdateOperationRepository
 from app.schemas.update import UpdateInstallRequest, UpdateOperationInfo, UpdateStatusRead
 from app.services.docker_capability_service import get_docker_capability_service
-from app.services.update_check_service import get_update_check_service
+from app.services.update_check_service import get_update_check_service, parse_version
 from app.services.update_execution_gate import build_update_execution_gate
 from app.services.update_install_service import get_update_install_service
 
@@ -100,7 +100,16 @@ async def _with_runtime_status(
     gate = build_update_execution_gate().evaluate(db)
     repository = UpdateOperationRepository(db)
     active_operation = repository.get_active()
-    operation = active_operation or repository.get_latest()
+    operation = active_operation
+    if operation is None:
+        latest_operation = repository.get_latest()
+        if latest_operation is not None and _terminal_operation_matches_current_version(
+            status=latest_operation.status,
+            source_version=latest_operation.source_version,
+            target_version=latest_operation.target_version,
+            current_version=status.current_version,
+        ):
+            operation = latest_operation
     install_supported = (
         capability.reason_code == "ready"
         and active_operation is None
@@ -129,6 +138,27 @@ async def _with_runtime_status(
             ),
         }
     )
+
+
+def _terminal_operation_matches_current_version(
+    *,
+    status: str,
+    source_version: str,
+    target_version: str | None,
+    current_version: str,
+) -> bool:
+    current = parse_version(current_version)
+    source = parse_version(source_version)
+    target = parse_version(target_version) if target_version is not None else None
+    if current is None:
+        return False
+    if status == "success":
+        return target == current
+    if status in {"failed", "cancelled", "rolled_back"}:
+        return source == current
+    if status == "rollback_failed":
+        return source == current or target == current
+    return False
 
 
 @router.get("/dashboard/summary")
