@@ -18,6 +18,7 @@ from app.services.docker_capability_service import (
 from app.services.image_target_service import VerifiedImageTarget
 from app.services.updater_handoff_service import (
     UPDATER_COMMAND,
+    SafeDevice,
     UpdaterHandoffError,
     UpdaterHandoffService,
     UpdaterHandoffStore,
@@ -148,12 +149,61 @@ def test_candidate_template_keeps_only_rebuild_whitelist() -> None:
     assert "CapAdd" not in serialized
 
 
+def test_candidate_template_preserves_valid_device_mappings() -> None:
+    container = deepcopy(current_container())
+    container["HostConfig"]["Devices"] = [
+        {
+            "PathOnHost": "/dev/dri",
+            "PathInContainer": "/dev/dri",
+            "CgroupPermissions": "rwm",
+        }
+    ]
+
+    template = extract_candidate_template(container, socket_path=SOCKET_PATH)
+
+    assert template.devices == (SafeDevice("/dev/dri", "/dev/dri", "rwm"),)
+    assert template.to_candidate_create_config(image=f"image@{DIGEST}")["HostConfig"][
+        "Devices"
+    ] == [
+        {
+            "PathOnHost": "/dev/dri",
+            "PathInContainer": "/dev/dri",
+            "CgroupPermissions": "rwm",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
         (lambda item: item["HostConfig"].update(Privileged=True), "高权限"),
         (lambda item: item["HostConfig"].update(CapAdd=["SYS_ADMIN"]), "高权限"),
-        (lambda item: item["HostConfig"].update(Devices=[{}]), "设备映射"),
+        (lambda item: item["HostConfig"].update(DeviceRequests=[{}]), "GPU 设备请求"),
+        (lambda item: item["HostConfig"].update(Devices=[{}]), "设备映射无效"),
+        (
+            lambda item: item["HostConfig"].update(
+                Devices=[
+                    {
+                        "PathOnHost": "dev/dri",
+                        "PathInContainer": "/dev/dri",
+                        "CgroupPermissions": "rwm",
+                    }
+                ]
+            ),
+            "设备映射无效",
+        ),
+        (
+            lambda item: item["HostConfig"].update(
+                Devices=[
+                    {
+                        "PathOnHost": "/dev/dri",
+                        "PathInContainer": "/dev/dri",
+                        "CgroupPermissions": "rwz",
+                    }
+                ]
+            ),
+            "设备映射权限无效",
+        ),
         (lambda item: item["HostConfig"].update(NetworkMode="host"), "网络模式"),
         (lambda item: item["Mounts"][0].update(RW=False), "/data 必须可写"),
     ],

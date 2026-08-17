@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import shutil
 import sqlite3
 from datetime import UTC, datetime
@@ -113,6 +114,12 @@ class HandoffMount(StrictModel):
     read_only: bool
 
 
+class HandoffDevice(StrictModel):
+    path_on_host: str
+    path_in_container: str
+    cgroup_permissions: str
+
+
 class HandoffCandidate(StrictModel):
     container_id: str
     name: str
@@ -128,6 +135,7 @@ class HandoffCandidate(StrictModel):
     dns: tuple[str, ...]
     group_add: tuple[str, ...]
     readonly_rootfs: bool
+    devices: tuple[HandoffDevice, ...] = ()
 
 
 class HandoffDocument(StrictModel):
@@ -615,9 +623,30 @@ def validate_handoff_document(document: HandoffDocument) -> None:
         document.source_digest
     ):
         raise UpdateSnapshotError("updater handoff 源镜像 digest 无效")
+    device_targets: set[str] = set()
+    for device in document.candidate.devices:
+        if (
+            not _valid_handoff_device_path(device.path_on_host)
+            or not _valid_handoff_device_path(device.path_in_container)
+            or not device.cgroup_permissions
+            or len(set(device.cgroup_permissions)) != len(device.cgroup_permissions)
+            or not set(device.cgroup_permissions).issubset({"r", "w", "m"})
+            or device.path_in_container in device_targets
+        ):
+            raise UpdateSnapshotError("updater handoff 设备映射无效")
+        device_targets.add(device.path_in_container)
     data_mounts = [mount for mount in document.candidate.mounts if mount.target == "/data"]
     if len(data_mounts) != 1 or data_mounts[0].read_only:
         raise UpdateSnapshotError("updater handoff 数据挂载无效")
+
+
+def _valid_handoff_device_path(value: str) -> bool:
+    return (
+        1 < len(value) <= 4096
+        and value.startswith("/")
+        and "\x00" not in value
+        and posixpath.normpath(value) == value
+    )
 
 
 class UpdateSnapshotService:

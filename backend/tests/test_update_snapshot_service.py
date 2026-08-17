@@ -133,6 +133,22 @@ def test_snapshot_manifest_is_complete_private_and_contains_no_secret(
     )
 
 
+def test_handoff_rejects_tampered_device_mapping(tmp_path: Path) -> None:
+    path = write_handoff(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["candidate"]["devices"] = [
+        {
+            "path_on_host": "/dev/../etc",
+            "path_in_container": "/dev/dri",
+            "cgroup_permissions": "rwm",
+        }
+    ]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(UpdateSnapshotError, match="设备映射无效"):
+        read_handoff(path, expected_operation_id=OPERATION_ID)
+
+
 def test_snapshot_includes_live_wal_and_shm_as_one_restore_unit(
     tmp_path: Path,
 ) -> None:

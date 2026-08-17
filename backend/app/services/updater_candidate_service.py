@@ -184,6 +184,14 @@ def build_candidate_create_config(
             "Dns": list(candidate.dns),
             "GroupAdd": list(candidate.group_add),
             "ReadonlyRootfs": candidate.readonly_rootfs,
+            "Devices": [
+                {
+                    "PathOnHost": device.path_on_host,
+                    "PathInContainer": device.path_in_container,
+                    "CgroupPermissions": device.cgroup_permissions,
+                }
+                for device in candidate.devices
+            ],
         },
         "NetworkingConfig": {"EndpointsConfig": endpoint_config},
     }

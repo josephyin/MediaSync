@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import secrets
 import uuid
@@ -55,6 +56,20 @@ class SafeMount:
 
 
 @dataclass(frozen=True)
+class SafeDevice:
+    path_on_host: str
+    path_in_container: str
+    cgroup_permissions: str
+
+    def docker_device(self) -> dict[str, str]:
+        return {
+            "PathOnHost": self.path_on_host,
+            "PathInContainer": self.path_in_container,
+            "CgroupPermissions": self.cgroup_permissions,
+        }
+
+
+@dataclass(frozen=True)
 class CandidateContainerTemplate:
     container_id: str
     name: str
@@ -70,6 +85,7 @@ class CandidateContainerTemplate:
     dns: tuple[str, ...]
     group_add: tuple[str, ...]
     readonly_rootfs: bool
+    devices: tuple[SafeDevice, ...] = ()
 
     def data_mount(self) -> SafeMount:
         return next(mount for mount in self.mounts if mount.target == "/data")
@@ -95,6 +111,7 @@ class CandidateContainerTemplate:
                 "Dns": list(self.dns),
                 "GroupAdd": list(self.group_add),
                 "ReadonlyRootfs": self.readonly_rootfs,
+                "Devices": [device.docker_device() for device in self.devices],
             },
             "NetworkingConfig": {"EndpointsConfig": endpoint_config},
         }
@@ -252,8 +269,9 @@ def extract_candidate_template(
     host = require_mapping(container.get("HostConfig"), "当前容器宿主配置不完整")
     if host.get("Privileged") is True or nonempty_list(host.get("CapAdd")):
         raise UpdaterHandoffError("高权限容器不支持一键更新")
-    if nonempty_list(host.get("Devices")):
-        raise UpdaterHandoffError("带设备映射的容器暂不支持一键更新")
+    device_requests = host.get("DeviceRequests")
+    if device_requests is not None and device_requests != []:
+        raise UpdaterHandoffError("带 GPU 设备请求的容器暂不支持一键更新")
     network_mode = string_value(host.get("NetworkMode"), "default")
     if network_mode in {"host", "none"} or network_mode.startswith("container:"):
         raise UpdaterHandoffError("当前网络模式不支持一键更新")
@@ -282,6 +300,7 @@ def extract_candidate_template(
         dns=string_tuple(host.get("Dns")),
         group_add=string_tuple(host.get("GroupAdd")),
         readonly_rootfs=host.get("ReadonlyRootfs") is True,
+        devices=extract_devices(host.get("Devices")),
     )
 
 
@@ -399,6 +418,52 @@ def extract_labels(value: object) -> dict[str, str]:
     ):
         raise UpdaterHandoffError("当前容器标签无效")
     return value
+
+
+def extract_devices(value: object) -> tuple[SafeDevice, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise UpdaterHandoffError("当前容器设备映射无效")
+    devices: list[SafeDevice] = []
+    targets: set[str] = set()
+    for item in value:
+        mapping = require_mapping(item, "当前容器设备映射无效")
+        path_on_host = mapping.get("PathOnHost")
+        path_in_container = mapping.get("PathInContainer")
+        permissions = mapping.get("CgroupPermissions")
+        if not _valid_device_path(path_on_host) or not _valid_device_path(
+            path_in_container
+        ):
+            raise UpdaterHandoffError("当前容器设备映射无效")
+        if (
+            not isinstance(permissions, str)
+            or not permissions
+            or len(set(permissions)) != len(permissions)
+            or not set(permissions).issubset({"r", "w", "m"})
+        ):
+            raise UpdaterHandoffError("当前容器设备映射权限无效")
+        if path_in_container in targets:
+            raise UpdaterHandoffError("当前容器存在重复设备映射目标")
+        targets.add(path_in_container)
+        devices.append(
+            SafeDevice(
+                path_on_host=path_on_host,
+                path_in_container=path_in_container,
+                cgroup_permissions=permissions,
+            )
+        )
+    return tuple(devices)
+
+
+def _valid_device_path(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 < len(value) <= 4096
+        and value.startswith("/")
+        and "\x00" not in value
+        and posixpath.normpath(value) == value
+    )
 
 
 def extract_port_bindings(value: object) -> dict[str, list[dict[str, str]]]:
