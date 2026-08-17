@@ -13,6 +13,7 @@ from app.services.updater_candidate_service import (
 )
 from app.services.updater_handoff_service import (
     CandidateContainerTemplate,
+    SafeDevice,
     SafeMount,
     UpdaterHandoffIntent,
     UpdaterHandoffStore,
@@ -49,6 +50,7 @@ def write_handoff(tmp_path: Path):
         dns=("1.1.1.1",),
         group_add=("100",),
         readonly_rootfs=False,
+        devices=(SafeDevice("/dev/dri", "/dev/dri", "rwm"),),
     )
     path = UpdaterHandoffStore(
         directory=str(tmp_path / "update" / "operations")
@@ -82,6 +84,14 @@ def test_prepare_writes_private_minimal_marker_and_trusted_candidate_identity(
     )
 
     preparation = service.prepare(document)
+
+    assert preparation.create_config["HostConfig"]["Devices"] == [
+        {
+            "PathOnHost": "/dev/dri",
+            "PathInContainer": "/dev/dri",
+            "CgroupPermissions": "rwm",
+        }
+    ]
 
     payload = json.loads(pending.read_text(encoding="utf-8"))
     assert payload == {

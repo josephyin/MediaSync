@@ -2,6 +2,32 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.17] - 2026-08-17
+
+这是 NAS 一键更新设备映射兼容补丁。此前只要当前容器存在 Docker `Devices`
+映射，更新器就会在准备阶段一律拒绝，无法继承 NAS 为容器配置的设备。
+
+### 修复
+
+- 严格校验并保存当前容器的设备宿主路径、容器内路径和 `rwm` 权限组合，在候选
+  MediaSync 容器中原样恢复。
+- updater 助手容器本身不继承任何设备权限；设备只交给替换后的 MediaSync
+  容器，避免扩大更新控制面的权限。
+- 非法路径、重复容器内目标、非法权限和复杂 GPU `DeviceRequests` 继续拒绝，
+  防止静默丢失或改变设备配置。
+
+### 验证
+
+- 增加有效 `/dev/dri` 映射继承测试，覆盖容器检查、私有 handoff 和候选创建。
+- 增加无效字段、相对路径、非法权限及 handoff 篡改的拒绝测试。
+
+### 升级说明
+
+- rc.16 用户仍需在 NAS 容器管理器中手工重建到 rc.17 一次，并保持原端口、
+  环境变量、Docker Socket、设备映射和 `/data`；进入 rc.17 后，普通 `Devices`
+  映射可随一键更新继承。
+- 本版本没有数据库迁移、Task Engine 或 Provider 行为变化。
+
 ## [0.2.0-rc.16] - 2026-08-17
 
 这是系统设置更新结果展示修复候选版本。此前升级到新版本后，数据库中保留的
@@ -434,6 +460,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.17]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.17
 [0.2.0-rc.16]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.16
 [0.2.0-rc.15]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.15
 [0.2.0-rc.14]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.14
