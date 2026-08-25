@@ -20,3 +20,13 @@ class ProviderCapabilityError(ProviderError):
 
 class ProviderRequestError(ProviderError):
     code = "PROVIDER_REQUEST_FAILED"
+
+
+class ProviderWriteUncertainError(ProviderRequestError):
+    """A write may have reached the provider, so it must not be replayed blindly."""
+
+    code = "PROVIDER_WRITE_UNCERTAIN"
+
+
+class ProviderOperationPendingError(ProviderRequestError):
+    code = "PROVIDER_OPERATION_PENDING"

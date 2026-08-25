@@ -216,11 +216,22 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.17` NAS 设备映射继承修复候选版
 - [ ] 完成 v0.2 八周稳定性观察
 - [ ] 发布 `v0.2.0` 正式版
-- [ ] 夸克网盘 Provider
+- [x] 夸克网盘私有 Q2 只读适配
+- [x] 夸克网盘 OpenList OpenAPI 双凭证适配（待真实凭证验收）
+- [x] 夸克网盘私有转存与恢复对账（实验性，跨账号单项真实验收通过）
+- [x] 夸克网盘 Provider（实验性；不支持把本账号分享转存回同一账号）
 - [ ] 115 Provider
 - [ ] OneDrive Provider
 - [ ] 多用户和更细粒度权限
 - [ ] PostgreSQL 与分布式任务队列
+
+维护者文档：[v0.2.0 正式版发布就绪清单](docs/operations/v0.2-release-readiness.md)；
+后续能力设计：[夸克网盘 Provider 接入设计草案](docs/architecture/quark-provider-design.md)、
+[夸克 OpenAPI 托管授权 Q0 门禁](docs/architecture/quark-open-api-q0.md)、
+[夸克私有接口 Q0 验证记录](docs/architecture/quark-private-api-q0.md)；
+本机验证：[夸克网盘只读诊断手册](docs/operations/quark-readonly-probe.md)。
+写入验收：[夸克网盘单项转存验收](docs/operations/quark-write-probe.md)。
+OpenAPI 验证：[夸克 OpenList OpenAPI 只读验收](docs/operations/quark-openlist-probe.md)。
 
 ## 参与贡献
 

@@ -18,6 +18,23 @@ export interface CloudAccount {
   created_at: string
 }
 
+export interface ProviderInfo {
+  id: string
+  name: string
+  enabled: boolean
+  status?: 'experimental' | 'partial' | 'stable' | string
+  mode?: string
+  capabilities: string[]
+}
+
+export interface SystemInfo {
+  name: string
+  version: string
+  environment: string
+  scheduler_enabled: boolean
+  providers: ProviderInfo[]
+}
+
 export interface DriveInfo {
   id: string
   name: string

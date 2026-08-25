@@ -9,6 +9,7 @@ from app.schemas.cloud_account import OpenCredentialConfigure
 from app.services.account_service import (
     DEFAULT_ALISTGO_TOKEN_URL,
     DEFAULT_OPENLIST_TOKEN_URL,
+    DEFAULT_QUARK_OPENLIST_TOKEN_URL,
     configure_open_credential,
     get_open_provider,
     verify_open_credential,
@@ -31,9 +32,9 @@ class FakeAccountProvider:
         return None
 
 
-def make_account(db: Session) -> CloudAccount:
+def make_account(db: Session, provider: str = "aliyundrive") -> CloudAccount:
     account = CloudAccount(
-        provider="aliyundrive",
+        provider=provider,
         name="test",
         refresh_token=get_credential_cipher().encrypt("private-token"),
         status="active",
@@ -85,6 +86,64 @@ def test_configure_all_open_credential_modes() -> None:
         assert provider.client_secret == "client-secret"
 
 
+def test_configure_quark_openlist_credential_reuses_encrypted_open_fields() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "quark")
+        configure_open_credential(
+            db,
+            account,
+            OpenCredentialConfigure(
+                mode="openlist",
+                refresh_token="quark-refresh-token",
+                client_id="quark-app-id",
+                client_secret="quark-sign-key",
+            ),
+        )
+
+        provider = get_open_provider(account)
+        assert account.open_auth_mode == "openlist"
+        assert account.open_token_url == DEFAULT_QUARK_OPENLIST_TOKEN_URL
+        assert account.open_client_id == "quark-app-id"
+        assert account.open_client_secret != "quark-sign-key"
+        assert provider.refresh_token == "quark-refresh-token"
+        assert provider.app_id == "quark-app-id"
+        assert provider.sign_key == "quark-sign-key"
+
+
+def test_quark_openlist_rejects_missing_app_credentials() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "quark")
+        with pytest.raises(ValueError, match="AppID and SignKey are required"):
+            configure_open_credential(
+                db,
+                account,
+                OpenCredentialConfigure(mode="openlist", refresh_token="token"),
+            )
+
+
+@pytest.mark.parametrize("mode", ["alistgo", "custom"])
+def test_quark_rejects_non_openlist_modes(mode: str) -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "quark")
+        with pytest.raises(ValueError, match="requires OpenList mode"):
+            configure_open_credential(
+                db,
+                account,
+                OpenCredentialConfigure(
+                    mode=mode,
+                    refresh_token="token",
+                    client_id="app",
+                    client_secret="secret",
+                ),
+            )
+
+
 async def test_open_credential_rejects_a_different_account(monkeypatch) -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -104,7 +163,39 @@ async def test_open_credential_rejects_a_different_account(monkeypatch) -> None:
             lambda *_: FakeAccountProvider("open-user"),
         )
 
-        with pytest.raises(ValueError, match="different Aliyun Drive account"):
+        with pytest.raises(ValueError, match="different cloud account"):
             await verify_open_credential(db, account)
 
         assert account.open_status == "error"
+
+
+async def test_quark_open_credential_allows_independent_validation_without_private_user_id(
+    monkeypatch,
+) -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "quark")
+        configure_open_credential(
+            db,
+            account,
+            OpenCredentialConfigure(
+                mode="openlist",
+                refresh_token="token",
+                client_id="app",
+                client_secret="secret",
+            ),
+        )
+        monkeypatch.setattr(
+            "app.services.account_service.get_provider",
+            lambda *_: FakeAccountProvider(""),
+        )
+        monkeypatch.setattr(
+            "app.services.account_service.get_open_provider",
+            lambda *_: FakeAccountProvider("open-user"),
+        )
+
+        verified = await verify_open_credential(db, account)
+
+        assert verified.open_status == "active"
+        assert verified.open_account_identity == "open-user"

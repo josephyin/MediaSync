@@ -9,11 +9,12 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.exceptions import ProviderRequestError
+from app.core.exceptions import ProviderRequestError, ProviderWriteUncertainError
 from app.models import Base, CloudAccount, CloudFile, Subscription, Task, TaskRun
 from app.providers.base import (
     FolderRef,
     RemoteItem,
+    SaveOperation,
     SaveResult,
     ShareInfo,
 )
@@ -93,6 +94,35 @@ class FakeTransferProvider:
         return SaveResult(
             target_file_id="saved-file-1",
             target_path=f"{target.path}/{source.filename}",
+        )
+
+
+class FakeResumableTransferProvider(FakeTransferProvider):
+    def __init__(self, *, completed: bool = False, uncertain: bool = False) -> None:
+        super().__init__()
+        self.completed = completed
+        self.uncertain = uncertain
+        self.start_calls = 0
+        self.query_calls = 0
+
+    async def start_save_shared_item(
+        self,
+        _share: ShareInfo,
+        _source: RemoteItem,
+        _target: FolderRef,
+    ) -> str:
+        self.start_calls += 1
+        if self.uncertain:
+            raise ProviderWriteUncertainError("request timed out with secret-token")
+        return "provider-task-1"
+
+    async def query_save_operation(self, operation_id: str) -> SaveOperation:
+        self.query_calls += 1
+        assert operation_id == "provider-task-1"
+        return SaveOperation(
+            operation_id=operation_id,
+            completed=self.completed,
+            target_file_ids=("saved-file-1",) if self.completed else (),
         )
 
 
@@ -272,6 +302,81 @@ async def test_transfer_handler_integrates_with_fenced_worker_runtime(
     assert task.status == "success"
     assert file.status == "saved"
     assert run_count == 1
+
+
+async def test_resumable_transfer_persists_operation_and_resumes_without_resubmit(
+    sessions: sessionmaker[Session],
+) -> None:
+    task_id, subscription_id, file_id = seed_transfer(sessions)
+    provider = FakeResumableTransferProvider()
+    transfer_handler = handler(sessions, provider)
+
+    first = await transfer_handler(
+        context(
+            task_id=task_id,
+            subscription_id=subscription_id,
+            file_id=file_id,
+        )
+    )
+    with sessions() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        assert task.provider_write_intent_at == NOW.replace(tzinfo=None)
+        assert task.provider_operation_id == "provider-task-1"
+        assert task.provider_operation_status == "pending"
+
+    provider.completed = True
+    resumed_context = context(
+        task_id=task_id,
+        subscription_id=subscription_id,
+        file_id=file_id,
+    )
+    resumed_context = replace(
+        resumed_context,
+        task=replace(
+            resumed_context.task,
+            provider_operation_id="provider-task-1",
+            provider_operation_status="pending",
+        ),
+    )
+    second = await transfer_handler(resumed_context)
+    task, file, _run_count = load_state(sessions, task_id, file_id)
+
+    assert first.status == "retry"
+    assert first.error_code == "PROVIDER_OPERATION_PENDING"
+    assert second.status == "success"
+    assert provider.start_calls == 1
+    assert provider.query_calls == 2
+    assert task.provider_operation_status == "succeeded"
+    assert task.provider_result == {
+        "target_file_id": "saved-file-1",
+        "target_path": "/Media/Movies/movie.mkv",
+    }
+    assert file.status == "saved"
+
+
+async def test_uncertain_write_is_terminal_and_never_contains_secret(
+    sessions: sessionmaker[Session],
+) -> None:
+    task_id, subscription_id, file_id = seed_transfer(sessions)
+    provider = FakeResumableTransferProvider(uncertain=True)
+
+    outcome = await handler(sessions, provider)(
+        context(
+            task_id=task_id,
+            subscription_id=subscription_id,
+            file_id=file_id,
+        )
+    )
+    task, file, _run_count = load_state(sessions, task_id, file_id)
+
+    assert outcome.status == "failed"
+    assert outcome.error_code == "PROVIDER_WRITE_UNCERTAIN"
+    assert "secret-token" not in (outcome.error_message or "")
+    assert task.provider_operation_status == "uncertain"
+    assert task.provider_operation_id is None
+    assert file.status == "failed"
+    assert provider.start_calls == 1
 
 
 async def test_existing_destination_is_reconciled_without_copy(

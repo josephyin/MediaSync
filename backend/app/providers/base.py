@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(slots=True)
@@ -55,6 +55,13 @@ class SaveResult:
     target_path: str
 
 
+@dataclass(slots=True)
+class SaveOperation:
+    operation_id: str
+    completed: bool
+    target_file_ids: tuple[str, ...] = ()
+
+
 class CloudDriveProvider(Protocol):
     async def validate_account(self) -> AccountProfile: ...
 
@@ -79,3 +86,12 @@ class CloudDriveProvider(Protocol):
     ) -> SaveResult: ...
 
     def consume_refresh_token_update(self) -> str | None: ...
+
+
+@runtime_checkable
+class ResumableSaveProvider(Protocol):
+    async def start_save_shared_item(
+        self, share: ShareInfo, source: RemoteItem, target: FolderRef
+    ) -> str: ...
+
+    async def query_save_operation(self, operation_id: str) -> SaveOperation: ...

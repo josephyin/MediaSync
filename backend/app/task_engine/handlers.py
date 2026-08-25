@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Literal, Protocol
 
@@ -42,6 +42,10 @@ class TaskInvocation:
     claimed_status: str
     retry_count: int
     max_retries: int
+    provider_write_intent_at: datetime | None = None
+    provider_operation_id: str | None = None
+    provider_operation_status: str | None = None
+    provider_result: Mapping[str, object] | None = None
 
     @classmethod
     def from_task(cls, task: Task, *, task_run_id: int) -> TaskInvocation:
@@ -64,6 +68,14 @@ class TaskInvocation:
             claimed_status=task.status,
             retry_count=task.retry_count,
             max_retries=task.max_retries,
+            provider_write_intent_at=task.provider_write_intent_at,
+            provider_operation_id=task.provider_operation_id,
+            provider_operation_status=task.provider_operation_status,
+            provider_result=(
+                MappingProxyType(dict(task.provider_result))
+                if task.provider_result is not None
+                else None
+            ),
         )
 
 
