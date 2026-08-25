@@ -2,6 +2,44 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.18] - 2026-08-25
+
+这是夸克网盘实验性 Provider 候选版本，同时补齐通用 Provider 异步写入的持久化
+恢复边界。维护者已确认 rc.17 稳定性观察通过；rc.18 仍需完成公开镜像与升级冒烟。
+
+### 新增
+
+- 新增夸克 Cookie 私有接口账号验证、分享浏览、目标目录浏览与创建，以及分享转存。
+- 新增单项只读和写入诊断命令；凭证只在当前进程使用，输出统一脱敏。
+- 新增可选的 OpenList OpenAPI 账号盘适配。该能力需要同一授权配置中的 Refresh
+  Token、AppID 和 SignKey，不是分享订阅的必填项。
+- 前端按 Provider 能力开放实验性夸克账号与订阅入口。
+
+### 可靠性
+
+- `tasks` 新增通用 write intent、远端 operation ID、状态和脱敏结果字段；Worker
+  重启后只恢复查询已有远端任务，不重复提交写请求。
+- 写入超时、连接中断、上游 `5xx` 或已接受请求但缺少 operation ID 时进入
+  `uncertain`，停止自动重试并要求人工对账。
+- 夸克 Cookie 轮换继续使用现有加密凭证持久化路径，不写入任务 payload 或日志。
+
+### 验证与限制
+
+- 使用另一个夸克账号创建的单项分享完成真实转存，提交、远端完成、目标 ID 和目标
+  目录复核均通过。
+- 目标账号不能把自己创建的分享转存回同一账号；实测会返回
+  `HTTP 404 / code 41017`，该错误作为确定拒绝停止重试。
+- 后端 650 项测试、前端测试与生产构建、全新数据库迁移和 CI 单镜像 Appliance
+  冒烟均通过。
+
+### 升级说明
+
+- 从 rc.17 升级会自动执行 `0008_provider_operations` 数据库迁移，只增加可空任务
+  字段，不修改已有订阅、文件或历史任务结果；升级前仍应备份完整 `/data`。
+- 现有阿里云盘配置不需要修改。使用夸克时需要在账号页面输入目标账号 Cookie；
+  分享必须由另一个账号创建。
+- 本版本仍是候选版本；夸克与阿里云盘 Web 私有接口均可能受上游变化或风控影响。
+
 ## [0.2.0-rc.17] - 2026-08-17
 
 这是 NAS 一键更新设备映射兼容补丁。此前只要当前容器存在 Docker `Devices`
@@ -460,6 +498,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.18]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.18
 [0.2.0-rc.17]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.17
 [0.2.0-rc.16]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.16
 [0.2.0-rc.15]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.15
