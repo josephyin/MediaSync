@@ -545,6 +545,10 @@ async def test_rollback_v2_restores_old_container_and_publishes_terminal(
     source = engine.containers[SOURCE_ID]
     assert result.status == "rolled_back"
     assert result.checkpoint == "rollback_published"
+    assert result.error_code == "update_forward_incomplete"
+    assert result.public_error_message == (
+        "更新在“验证新版本容器”阶段未能完成，已自动恢复到更新前版本"
+    )
     assert result.sequence == 19
     assert CANDIDATE_ID not in engine.containers
     assert source["Name"] == "/MediaSync"

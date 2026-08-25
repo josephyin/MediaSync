@@ -44,6 +44,16 @@ const operationPresentation = computed(() => {
   }
 })
 
+const operationDescription = computed(() => {
+  const operation = update.value?.operation
+  if (!operation) return ''
+  if (operation.error_message) return operation.error_message
+  if (operation.status === 'rolled_back') {
+    return '更新未能完成，系统已自动恢复；该次更新未记录具体失败阶段。'
+  }
+  return `目标版本：${operation.target_version ?? '等待确认'}`
+})
+
 const statusPresentation = computed(() => {
   if (!update.value) return { label: '读取中', type: 'info' as const }
   if (update.value.status === 'update_available') {
@@ -196,8 +206,7 @@ onBeforeUnmount(() => {
     <el-alert
       v-if="operationPresentation"
       :title="operationPresentation.label"
-      :description="update?.operation?.error_message
-        || `目标版本：${update?.operation?.target_version ?? '等待确认'}`"
+      :description="operationDescription"
       :type="operationPresentation.type"
       :closable="false"
       show-icon
