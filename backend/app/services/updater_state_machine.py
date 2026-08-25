@@ -522,6 +522,10 @@ class UpdaterStateMachine:
             ValueError,
         ) as exc:
             if document is not None and old_stopped and not self._commit_started(operation_id):
+                failure_error_code = "update_switch_failed"
+                failure_public_message = (
+                    f"更新在“{phase}”阶段失败，已自动恢复到更新前版本"
+                )
                 try:
                     await self._rollback(
                         document=document,
@@ -530,6 +534,8 @@ class UpdaterStateMachine:
                         snapshot_verified=snapshot_verified,
                         pending_ready=pending_ready,
                         old_renamed=old_renamed,
+                        failure_error_code=failure_error_code,
+                        failure_public_message=failure_public_message,
                     )
                 except (
                     DockerEngineError,
@@ -565,8 +571,15 @@ class UpdaterStateMachine:
         snapshot_verified: bool,
         pending_ready: bool,
         old_renamed: bool,
+        failure_error_code: str,
+        failure_public_message: str,
     ) -> None:
-        self._journal.transition(operation_id=operation_id, status="rolling_back")
+        self._journal.transition(
+            operation_id=operation_id,
+            status="rolling_back",
+            error_code=failure_error_code,
+            public_error_message=failure_public_message,
+        )
         if candidate_id is not None:
             await self._engine.stop_container(
                 candidate_id,
@@ -593,7 +606,12 @@ class UpdaterStateMachine:
         )
         if not pending_ready:
             raise UpdaterStateMachineError("回滚缺少可供旧 Appliance 对账的 pending 标记")
-        self._journal.transition(operation_id=operation_id, status="rolled_back")
+        self._journal.transition(
+            operation_id=operation_id,
+            status="rolled_back",
+            error_code=failure_error_code,
+            public_error_message=failure_public_message,
+        )
 
     def _remove_candidate_evidence(self, operation_id: str) -> None:
         operations_directory = self._data_directory / "update" / "operations"

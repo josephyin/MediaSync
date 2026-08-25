@@ -33,6 +33,18 @@ from app.services.updater_state_machine import (
 
 FaultHook = Callable[[str], None]
 CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+FORWARD_FAILURE_PHASES: dict[UpdaterCheckpoint, str] = {
+    "initialized": "隔离旧容器重启策略",
+    "old_restart_fenced": "停止旧容器",
+    "old_stopped": "准备候选配置",
+    "pending_ready": "创建数据快照",
+    "snapshot_verified": "切换旧容器名称",
+    "old_renamed": "创建新版本容器",
+    "candidate_created": "启动新版本容器",
+    "candidate_started": "验证新版本容器",
+    "candidate_verified": "提交更新",
+    "commit_requested": "等待提交确认",
+}
 
 
 class UpdaterRollbackEngine(Protocol):
@@ -237,6 +249,7 @@ class UpdaterRollbackV2:
         candidate_id = (
             result.candidate_container_id or observation.candidate.container_id
         )
+        failure_phase = FORWARD_FAILURE_PHASES[result.checkpoint]
         self._fault_hook("after_effect:rollback_started")
         result = self._checkpoint(
             document.operation_id,
@@ -245,6 +258,10 @@ class UpdaterRollbackV2:
             candidate_token_hash=expected_hash,
             candidate_container_id=candidate_id,
             rollback_started=True,
+            error_code="update_forward_incomplete",
+            public_error_message=(
+                f"更新在“{failure_phase}”阶段未能完成，已自动恢复到更新前版本"
+            ),
         )
         return result, preparation
 
@@ -407,8 +424,19 @@ class UpdaterRollbackV2:
         candidate_token_hash: str | None = None,
         candidate_container_id: str | None = None,
         rollback_started: bool | None = None,
+        error_code: str | None = None,
+        public_error_message: str | None = None,
     ) -> UpdaterResultV2:
         self._fault_hook(f"before_checkpoint:{status}:{checkpoint}")
+        current = self._journal.read(operation_id=operation_id)
+        if (
+            isinstance(current, UpdaterResultV2)
+            and current.rollback_started
+            and error_code is None
+            and public_error_message is None
+        ):
+            error_code = current.error_code
+            public_error_message = current.public_error_message
         result = self._journal.checkpoint_v2(
             operation_id=operation_id,
             status=status,
@@ -416,6 +444,8 @@ class UpdaterRollbackV2:
             candidate_token_hash=candidate_token_hash,
             candidate_container_id=candidate_container_id,
             rollback_started=rollback_started,
+            error_code=error_code,
+            public_error_message=public_error_message,
         )
         self._fault_hook(f"after_checkpoint:{status}:{checkpoint}")
         return result

@@ -173,6 +173,8 @@ class FakeJournal:
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.status: str | None = None
+        self.error_code: str | None = None
+        self.public_error_message: str | None = None
 
     def start(self, *, operation_id: str) -> None:
         self.status = "snapshotting"
@@ -182,8 +184,17 @@ class FakeJournal:
         assert self.status is not None
         return SimpleNamespace(operation_id=operation_id, status=self.status)
 
-    def transition(self, *, operation_id: str, status: str, **_kwargs) -> None:
+    def transition(
+        self,
+        *,
+        operation_id: str,
+        status: str,
+        error_code: str | None = None,
+        public_error_message: str | None = None,
+    ) -> None:
         self.status = status
+        self.error_code = error_code
+        self.public_error_message = public_error_message
         self.events.append(f"journal:{status}:{operation_id}")
 
 
@@ -310,6 +321,10 @@ async def test_candidate_failure_rolls_back_without_deleting_old_container(
     assert f"snapshot:restore:{OPERATION_ID}" in events
     assert f"verify-previous:{OLD_CONTAINER_ID}" in events
     assert f"journal:rolled_back:{OPERATION_ID}" in events
+    assert machine._journal.error_code == "update_switch_failed"
+    assert machine._journal.public_error_message == (
+        "更新在“验证候选容器”阶段失败，已自动恢复到更新前版本"
+    )
     assert not any(event.startswith("journal:success") for event in events)
     assert not evidence.exists()
     assert (tmp_path / "update" / "pending.json").exists()
