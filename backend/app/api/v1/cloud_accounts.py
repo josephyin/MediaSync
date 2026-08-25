@@ -233,7 +233,7 @@ async def list_drives(account_id: int, db: DbSession, _: AdminUser) -> list[Driv
                 and open_profile.user_id
                 and private_profile.user_id != open_profile.user_id
             ):
-                raise ValueError("OpenAPI token belongs to a different Aliyun Drive account")
+                raise ValueError("OpenAPI token belongs to a different cloud account")
             account.open_account_identity = open_profile.identity
             account.open_status = "active"
             account.open_last_error = None
@@ -271,7 +271,12 @@ async def list_folders(
     drive_id: str | None = None,
 ) -> list[FolderItem]:
     account = _get_account(db, account_id)
-    provider = get_provider(account.provider, get_decrypted_token(account), drive_id)
+    using_open_provider = bool(account.open_auth_mode)
+    provider = (
+        get_open_provider(account, drive_id)
+        if using_open_provider
+        else get_provider(account.provider, get_decrypted_token(account), drive_id)
+    )
     try:
         folder = await provider.resolve_target_path(path)
         marker: str | None = None
@@ -285,7 +290,12 @@ async def list_folders(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
-        if persist_provider_token(account, provider):
+        token_changed = (
+            persist_open_provider_token(account, provider)
+            if using_open_provider
+            else persist_provider_token(account, provider)
+        )
+        if token_changed:
             db.commit()
     return [
         FolderItem(

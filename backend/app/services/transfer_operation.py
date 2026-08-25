@@ -4,9 +4,21 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from app.providers.base import CloudDriveProvider, FolderRef, RemoteItem
+from app.core.exceptions import (
+    ProviderOperationPendingError,
+    ProviderWriteUncertainError,
+)
+from app.providers.base import (
+    CloudDriveProvider,
+    FolderRef,
+    RemoteItem,
+    ResumableSaveProvider,
+    SaveResult,
+)
 
 CancellationProbe = Callable[[], Awaitable[bool]]
+WriteIntentRecorder = Callable[[], Awaitable[None]]
+OperationRecorder = Callable[[str], Awaitable[None]]
 
 
 class TransferCancelledError(RuntimeError):
@@ -38,6 +50,14 @@ async def _never_cancelled() -> bool:
     return False
 
 
+async def _ignore_intent() -> None:
+    return None
+
+
+async def _ignore_operation(_operation_id: str) -> None:
+    return None
+
+
 async def ensure_target_folder(
     provider: CloudDriveProvider,
     root_path: str,
@@ -61,6 +81,9 @@ async def execute_transfer(
     spec: TransferSpec,
     *,
     cancellation_requested: CancellationProbe = _never_cancelled,
+    provider_operation_id: str | None = None,
+    record_write_intent: WriteIntentRecorder = _ignore_intent,
+    record_provider_operation: OperationRecorder = _ignore_operation,
 ) -> TransferOperationResult:
     if await cancellation_requested():
         raise TransferCancelledError("transfer cancelled before provider access")
@@ -72,13 +95,14 @@ async def execute_transfer(
         spec.relative_path,
         cancellation_requested=cancellation_requested,
     )
-    existing = await provider.find_target_item(target, spec.filename)
-    if existing is not None:
-        return TransferOperationResult(
-            target_file_id=existing.remote_file_id,
-            target_path=str(PurePosixPath(target.path) / spec.filename),
-            already_existed=True,
-        )
+    if provider_operation_id is None:
+        existing = await provider.find_target_item(target, spec.filename)
+        if existing is not None:
+            return TransferOperationResult(
+                target_file_id=existing.remote_file_id,
+                target_path=str(PurePosixPath(target.path) / spec.filename),
+                already_existed=True,
+            )
 
     if await cancellation_requested():
         raise TransferCancelledError("transfer cancelled before remote save")
@@ -90,7 +114,32 @@ async def execute_transfer(
         size=spec.size,
         content_hash=spec.content_hash,
     )
-    result = await provider.save_shared_item(share, source, target)
+    if isinstance(provider, ResumableSaveProvider):
+        operation_id = provider_operation_id
+        if operation_id is None:
+            await record_write_intent()
+            operation_id = await provider.start_save_shared_item(share, source, target)
+            try:
+                await record_provider_operation(operation_id)
+            except Exception as exc:
+                raise ProviderWriteUncertainError(
+                    "cloud-drive operation was accepted but its ID was not persisted"
+                ) from exc
+        operation = await provider.query_save_operation(operation_id)
+        if not operation.completed:
+            raise ProviderOperationPendingError(
+                "cloud-drive save operation is still pending"
+            )
+        if len(operation.target_file_ids) != 1:
+            raise ProviderOperationPendingError(
+                "cloud-drive save result requires manual reconciliation"
+            )
+        result = SaveResult(
+            target_file_id=operation.target_file_ids[0],
+            target_path=str(PurePosixPath(target.path) / spec.filename),
+        )
+    else:
+        result = await provider.save_shared_item(share, source, target)
     return TransferOperationResult(
         target_file_id=result.target_file_id,
         target_path=result.target_path,

@@ -5,6 +5,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.exceptions import ProviderWriteUncertainError
 from app.models import Task
 from app.models.base import utcnow
 from app.providers import get_provider
@@ -50,6 +51,18 @@ async def run_transfer(db: Session, task: Task) -> None:
             get_decrypted_token(account),
             subscription.target_drive_id,
         )
+        async def record_write_intent() -> None:
+            task.provider_write_intent_at = task.provider_write_intent_at or utcnow()
+            task.provider_operation_status = "intent"
+            db.commit()
+
+        async def record_provider_operation(operation_id: str) -> None:
+            if task.provider_operation_id not in (None, operation_id):
+                raise RuntimeError("Transfer task already has another provider operation")
+            task.provider_operation_id = operation_id
+            task.provider_operation_status = "pending"
+            db.commit()
+
         result = await execute_transfer(
             provider,
             TransferSpec(
@@ -64,6 +77,9 @@ async def run_transfer(db: Session, task: Task) -> None:
                 size=file.size,
                 content_hash=file.content_hash,
             ),
+            provider_operation_id=task.provider_operation_id,
+            record_write_intent=record_write_intent,
+            record_provider_operation=record_provider_operation,
         )
         now = utcnow()
         file.status = "saved"
@@ -72,6 +88,12 @@ async def run_transfer(db: Session, task: Task) -> None:
         file.saved_at = now
         file.last_error = None
         task.status = "success"
+        if task.provider_operation_id is not None:
+            task.provider_operation_status = "succeeded"
+            task.provider_result = {
+                "target_file_id": result.target_file_id,
+                "target_path": result.target_path,
+            }
         request_count = getattr(provider, "request_count", None)
         request_summary = f"，API 请求 {request_count} 次" if request_count is not None else ""
         task.message = f"已转存至 {result.target_path}{request_summary}"
@@ -81,7 +103,13 @@ async def run_transfer(db: Session, task: Task) -> None:
         file.last_error = str(exc)
         task.error_code = getattr(exc, "code", exc.__class__.__name__.upper())
         task.message = str(exc)
-        if task.attempt_count >= task.max_attempts:
+        if isinstance(exc, ProviderWriteUncertainError):
+            task.provider_operation_status = "uncertain"
+            file.status = "failed"
+            task.status = "failed"
+            task.finished_at = utcnow()
+            task.next_attempt_at = None
+        elif task.attempt_count >= task.max_attempts:
             file.status = "failed"
             task.status = "failed"
             task.finished_at = utcnow()

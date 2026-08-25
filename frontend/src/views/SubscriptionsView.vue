@@ -2,12 +2,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Page } from '../api/client'
-import type { CloudAccount, DriveInfo, FolderItem, Subscription } from '../api/types'
+import type { CloudAccount, DriveInfo, FolderItem, ProviderInfo, Subscription, SystemInfo } from '../api/types'
 import AppIcon from '../components/AppIcon.vue'
 import { driveTypeLabels, formatDateTime, formatRelativeTime, scheduleLabel, statusLabel, statusType } from '../utils/display'
+import { findProvider, providerName, supportsCapabilities, supportsSubscriptions } from '../utils/providers'
 
 const subscriptions = ref<Subscription[]>([])
 const accounts = ref<CloudAccount[]>([])
+const providers = ref<ProviderInfo[]>([])
 const pageLoading = ref(false)
 const scanningId = ref<number | null>(null)
 const togglingId = ref<number | null>(null)
@@ -34,6 +36,15 @@ const breadcrumbs = computed(() => {
   return result
 })
 const selectedDrive = computed(() => drives.value.find((item) => item.id === form.target_drive_id))
+const eligibleAccounts = computed(() => accounts.value.filter((account) => (
+  supportsSubscriptions(findProvider(providers.value, account.provider))
+)))
+const accountOptions = computed(() => editingId.value ? accounts.value : eligibleAccounts.value)
+const selectedAccount = computed(() => accounts.value.find((account) => account.id === form.cloud_account_id))
+const selectedProvider = computed(() => findProvider(providers.value, selectedAccount.value?.provider ?? form.provider))
+const selectedProviderName = computed(() => (
+  selectedProvider.value?.name ?? providerName(providers.value, form.provider)
+))
 const filteredSubscriptions = computed(() => {
   const keyword = query.value.trim().toLowerCase()
   return subscriptions.value.filter((item) => {
@@ -48,10 +59,18 @@ const healthyCount = computed(() => subscriptions.value.filter((item) => item.st
 async function load() {
   pageLoading.value = true
   try {
-    const [subs, accts] = await Promise.all([api<Page<Subscription>>('/subscriptions?page_size=100'), api<Page<CloudAccount>>('/cloud-accounts?page_size=100')])
+    const [subs, accts, system] = await Promise.all([
+      api<Page<Subscription>>('/subscriptions?page_size=100'),
+      api<Page<CloudAccount>>('/cloud-accounts?page_size=100'),
+      api<SystemInfo>('/system/info'),
+    ])
     subscriptions.value = subs.items
     accounts.value = accts.items
-    if (!form.cloud_account_id && accounts.value.length) form.cloud_account_id = accounts.value[0].id
+    providers.value = system.providers
+    if (!form.cloud_account_id && eligibleAccounts.value.length) {
+      form.cloud_account_id = eligibleAccounts.value[0].id
+      form.provider = eligibleAccounts.value[0].provider
+    }
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '订阅列表加载失败')
   } finally {
@@ -60,8 +79,9 @@ async function load() {
 }
 function accountName(id: number) { return accounts.value.find((item) => item.id === id)?.name ?? `账号 #${id}` }
 function resetForm() {
+  const account = eligibleAccounts.value[0]
   Object.assign(form, {
-    name: '', cloud_account_id: accounts.value[0]?.id ?? 0, provider: 'aliyundrive',
+    name: '', cloud_account_id: account?.id ?? 0, provider: account?.provider ?? '',
     share_url: '', share_password: '', target_drive_id: '', target_drive_type: 'default',
     target_path: '/Media', schedule: 'interval:30m', initial_sync_mode: 'all', enabled: true,
   })
@@ -69,6 +89,10 @@ function resetForm() {
 async function saveSubscription() {
   if (!form.name.trim() || !form.target_drive_id || !form.target_path.trim()) {
     ElMessage.warning('请完整填写名称、目标盘和目标目录')
+    return
+  }
+  if (!editingId.value && !supportsSubscriptions(selectedProvider.value)) {
+    ElMessage.warning('所选 Provider 尚不支持分享浏览、目录浏览和转存')
     return
   }
   saving.value = true
@@ -131,6 +155,10 @@ function childPath(name: string) {
 async function loadFolders(path: string) {
   if (!form.cloud_account_id) { ElMessage.warning('请先选择目标云盘'); return }
   if (!form.target_drive_id) { ElMessage.warning('请先选择目标盘'); return }
+  if (!supportsCapabilities(selectedProvider.value, ['folder_browse'])) {
+    ElMessage.warning('所选 Provider 尚不支持目录浏览')
+    return
+  }
   folderLoading.value = true
   try {
     folders.value = await api<FolderItem[]>(`/cloud-accounts/${form.cloud_account_id}/folders?path=${encodeURIComponent(path)}&drive_id=${encodeURIComponent(form.target_drive_id)}`)
@@ -150,6 +178,10 @@ function selectCurrentFolder() {
 }
 async function loadDrives() {
   if (!form.cloud_account_id) return
+  if (!supportsCapabilities(selectedProvider.value, ['folder_browse'])) {
+    drives.value = []
+    return
+  }
   drivesLoading.value = true
   try {
     drives.value = await api<DriveInfo[]>(`/cloud-accounts/${form.cloud_account_id}/drives`)
@@ -162,6 +194,8 @@ async function loadDrives() {
   } finally { drivesLoading.value = false }
 }
 async function accountChanged() {
+  const account = accounts.value.find((item) => item.id === form.cloud_account_id)
+  form.provider = account?.provider ?? ''
   form.target_path = '/'
   form.target_drive_id = ''
   await loadDrives()
@@ -191,9 +225,10 @@ onMounted(load)
   <section>
     <div class="page-heading">
       <div><h1>分享订阅</h1><p>按计划增量检查分享目录，只为新内容创建转存任务</p></div>
-      <el-button type="primary" :disabled="!accounts.length" @click="openAddDialog"><AppIcon name="plus" />添加订阅</el-button>
+      <el-button type="primary" :disabled="!eligibleAccounts.length" @click="openAddDialog"><AppIcon name="plus" />添加订阅</el-button>
     </div>
     <el-alert v-if="!accounts.length" title="请先添加一个云盘账号" type="warning" :closable="false" class="section-gap" />
+    <el-alert v-else-if="!eligibleAccounts.length" title="当前账号的 Provider 尚未同时启用分享浏览、目录浏览和转存能力" type="warning" :closable="false" class="section-gap" />
 
     <div class="summary-strip">
       <div class="summary-item"><span class="summary-icon"><AppIcon name="subscription" /></span><div><strong>{{ subscriptions.length }}</strong><span>全部订阅</span></div></div>
@@ -220,7 +255,7 @@ onMounted(load)
             <template #default="scope">
               <div class="subscription-cell">
                 <span class="subscription-icon"><AppIcon name="subscription" /></span>
-                <div><strong class="cell-primary">{{ scope.row.name }}</strong><span>{{ accountName(scope.row.cloud_account_id) }}</span></div>
+                <div><strong class="cell-primary">{{ scope.row.name }}</strong><span>{{ accountName(scope.row.cloud_account_id) }} · {{ providerName(providers, scope.row.provider) }}</span></div>
               </div>
             </template>
           </el-table-column>
@@ -253,7 +288,7 @@ onMounted(load)
           <span class="empty-state__icon"><AppIcon name="subscription" /></span>
           <h3>{{ subscriptions.length ? '没有符合条件的订阅' : '还没有分享订阅' }}</h3>
           <p>{{ subscriptions.length ? '调整筛选条件后再试试。' : '添加分享链接后，MediaSync 会按计划检查并转存新增内容。' }}</p>
-          <el-button v-if="!subscriptions.length && accounts.length" type="primary" @click="openAddDialog">添加第一个订阅</el-button>
+          <el-button v-if="!subscriptions.length && eligibleAccounts.length" type="primary" @click="openAddDialog">添加第一个订阅</el-button>
         </div>
       </div>
     </div>
@@ -261,18 +296,19 @@ onMounted(load)
     <el-dialog v-model="dialog" :title="editingId ? '编辑分享订阅' : '添加分享订阅'" width="min(680px, calc(100vw - 32px))"><el-form label-position="top">
       <div class="form-section-title">资源来源</div>
       <el-form-item label="订阅名称"><el-input v-model="form.name" placeholder="例如：某剧集持续更新" /></el-form-item>
-      <el-form-item label="分享链接"><el-input v-model="form.share_url" :disabled="!!editingId" placeholder="粘贴阿里云盘分享链接" /></el-form-item>
+      <el-form-item label="分享链接"><el-input v-model="form.share_url" :disabled="!!editingId" :placeholder="`粘贴${selectedProviderName}分享链接`" /></el-form-item>
       <el-form-item v-if="!editingId" label="分享密码（可选）"><el-input v-model="form.share_password" /></el-form-item>
       <div class="form-section-title">保存位置</div>
       <div class="form-grid">
-        <el-form-item label="目标云盘"><el-select v-model="form.cloud_account_id" class="full-width" :disabled="!!editingId" @change="accountChanged"><el-option v-for="item in accounts" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item>
+        <el-form-item label="目标云盘"><el-select v-model="form.cloud_account_id" class="full-width" :disabled="!!editingId" @change="accountChanged"><el-option v-for="item in accountOptions" :key="item.id" :label="`${item.name}（${providerName(providers, item.provider)}）`" :value="item.id" /></el-select></el-form-item>
         <el-form-item label="目标盘">
         <el-select v-model="form.target_drive_id" class="full-width" filterable allow-create default-first-option :loading="drivesLoading" placeholder="选择盘类型，或粘贴 Drive ID" @change="form.target_path = '/'">
           <el-option v-for="item in drives" :key="item.id" :label="`${item.name}（${driveTypeLabels[item.type]}）`" :value="item.id" />
         </el-select>
         </el-form-item>
       </div>
-      <div class="form-tip drive-tip">私有接口未返回资源库时，可粘贴从 OpenList 获取的 Drive ID。</div>
+      <div v-if="form.provider === 'aliyundrive'" class="form-tip drive-tip">私有接口未返回资源库时，可粘贴从 OpenList 获取的 Drive ID。</div>
+      <div v-else class="form-tip drive-tip">目标盘和目录选项由 {{ selectedProviderName }} 当前声明的能力提供。</div>
       <el-form-item label="目标目录">
         <el-input v-model="form.target_path"><template #append><el-button @click="openFolderPicker"><AppIcon name="folder" />选择目录</el-button></template></el-input>
       </el-form-item>

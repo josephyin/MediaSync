@@ -13,8 +13,9 @@ from app.core.exceptions import (
     ProviderError,
     ProviderNotConfiguredError,
     ProviderRequestError,
+    ProviderWriteUncertainError,
 )
-from app.models import CloudAccount, CloudFile
+from app.models import CloudAccount, CloudFile, Task
 from app.models.base import utcnow
 from app.providers import get_provider
 from app.providers.base import CloudDriveProvider
@@ -159,6 +160,15 @@ class TransferTaskHandler:
                 provider,
                 source.spec,
                 cancellation_requested=context.cancellation_requested,
+                provider_operation_id=context.task.provider_operation_id,
+                record_write_intent=lambda: asyncio.to_thread(
+                    self._record_write_intent, context.task.task_id
+                ),
+                record_provider_operation=lambda operation_id: asyncio.to_thread(
+                    self._record_provider_operation,
+                    context.task.task_id,
+                    operation_id,
+                ),
             )
         except Exception as exc:
             operation_error = exc
@@ -176,6 +186,11 @@ class TransferTaskHandler:
 
         if operation_result is not None:
             try:
+                await asyncio.to_thread(
+                    self._record_provider_success,
+                    context.task.task_id,
+                    operation_result,
+                )
                 await asyncio.to_thread(
                     self._mark_success,
                     source.file_id,
@@ -206,6 +221,11 @@ class TransferTaskHandler:
 
         if operation_error is None:
             operation_error = RuntimeError("transfer operation returned no result")
+        if isinstance(operation_error, ProviderWriteUncertainError):
+            await asyncio.to_thread(
+                self._record_provider_uncertain,
+                context.task.task_id,
+            )
         disposition = self._classify_failure(operation_error)
         if not token_persisted:
             disposition = _FailureDisposition(
@@ -258,6 +278,51 @@ class TransferTaskHandler:
             file = self._require_file(session, file_id)
             file.status = "saving"
             file.last_error = None
+
+    def _record_write_intent(self, task_id: int) -> None:
+        with self._session_factory() as session, session.begin():
+            task = session.get(Task, task_id)
+            if task is None:
+                raise TransferSourceNotFoundError("transfer task was not found")
+            if task.provider_operation_id is not None:
+                return
+            task.provider_write_intent_at = task.provider_write_intent_at or self._clock()
+            task.provider_operation_status = "intent"
+
+    def _record_provider_operation(self, task_id: int, operation_id: str) -> None:
+        with self._session_factory() as session, session.begin():
+            task = session.get(Task, task_id)
+            if task is None:
+                raise TransferSourceNotFoundError("transfer task was not found")
+            if task.provider_operation_id not in (None, operation_id):
+                raise RuntimeError("transfer task already has another provider operation")
+            task.provider_operation_id = operation_id
+            task.provider_operation_status = "pending"
+
+    def _record_provider_success(
+        self,
+        task_id: int,
+        result: TransferOperationResult,
+    ) -> None:
+        with self._session_factory() as session, session.begin():
+            task = session.get(Task, task_id)
+            if task is None:
+                raise TransferSourceNotFoundError("transfer task was not found")
+            if task.provider_operation_id is None:
+                return
+            task.provider_operation_status = "succeeded"
+            task.provider_result = {
+                "target_file_id": result.target_file_id,
+                "target_path": result.target_path,
+            }
+
+    def _record_provider_uncertain(self, task_id: int) -> None:
+        with self._session_factory() as session, session.begin():
+            task = session.get(Task, task_id)
+            if task is None:
+                return
+            if task.provider_operation_id is None:
+                task.provider_operation_status = "uncertain"
 
     def _mark_success(
         self,
@@ -358,6 +423,14 @@ class TransferTaskHandler:
                 blocked_reason="cloud-drive credential requires user action",
             )
         if isinstance(exc, ProviderRequestError):
+            if isinstance(exc, ProviderWriteUncertainError):
+                return _FailureDisposition(
+                    status="failed",
+                    error_code=exc.code,
+                    safe_message=(
+                        "cloud-drive write result is uncertain and requires reconciliation"
+                    ),
+                )
             return _FailureDisposition(
                 status="retry",
                 error_code=exc.code,

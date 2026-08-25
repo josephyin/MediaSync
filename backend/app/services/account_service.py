@@ -9,6 +9,10 @@ from app.models import CloudAccount
 from app.providers import get_provider
 from app.providers.aliyundrive.provider import AliyunDriveProvider
 from app.providers.base import CloudDriveProvider
+from app.providers.quark.open_provider import (
+    DEFAULT_OPENLIST_TOKEN_URL as DEFAULT_QUARK_OPENLIST_TOKEN_URL,
+)
+from app.providers.quark.open_provider import QuarkOpenProvider
 from app.schemas.cloud_account import (
     CloudAccountCreate,
     CloudAccountUpdate,
@@ -18,6 +22,7 @@ from app.schemas.cloud_account import (
 DEFAULT_ALISTGO_TOKEN_URL = "https://api.alistgo.com/alist/ali_open/token"
 DEFAULT_OPENLIST_TOKEN_URL = "https://api.oplist.org.cn/alicloud/renewapi"
 HOSTED_OPEN_AUTH_MODES = {"alistgo", "openlist"}
+OPEN_CREDENTIAL_PROVIDERS = {"aliyundrive", "quark"}
 
 
 def create_account(db: Session, payload: CloudAccountCreate) -> CloudAccount:
@@ -90,8 +95,10 @@ def persist_provider_token(account: CloudAccount, provider: CloudDriveProvider) 
 def configure_open_credential(
     db: Session, account: CloudAccount, payload: OpenCredentialConfigure
 ) -> CloudAccount:
-    if account.provider != "aliyundrive":
-        raise ValueError("OpenAPI binding is only available for Aliyun Drive")
+    if account.provider not in OPEN_CREDENTIAL_PROVIDERS:
+        raise ValueError("OpenAPI binding is not available for this provider")
+    if account.provider == "quark" and payload.mode != "openlist":
+        raise ValueError("Quark OpenAPI currently requires OpenList mode")
     cipher = get_credential_cipher()
     mode_changed = account.open_auth_mode not in (None, payload.mode)
     refresh_token = payload.refresh_token.strip() if payload.refresh_token else None
@@ -101,9 +108,14 @@ def configure_open_credential(
         raise ValueError("OpenAPI refresh token is required")
 
     if payload.mode in HOSTED_OPEN_AUTH_MODES:
-        default_url = (
-            DEFAULT_ALISTGO_TOKEN_URL if payload.mode == "alistgo" else DEFAULT_OPENLIST_TOKEN_URL
-        )
+        if account.provider == "quark":
+            default_url = DEFAULT_QUARK_OPENLIST_TOKEN_URL
+        else:
+            default_url = (
+                DEFAULT_ALISTGO_TOKEN_URL
+                if payload.mode == "alistgo"
+                else DEFAULT_OPENLIST_TOKEN_URL
+            )
         token_url = (payload.token_url or default_url).strip()
         parsed_token_url = urlparse(token_url)
         if parsed_token_url.scheme != "https" or not parsed_token_url.hostname:
@@ -118,8 +130,21 @@ def configure_open_credential(
                 "Hosted OAuth token URL cannot contain credentials, query, or fragment"
             )
         account.open_token_url = token_url
-        account.open_client_id = None
-        account.open_client_secret = None
+        if account.provider == "quark":
+            app_id = payload.client_id.strip() if payload.client_id else None
+            sign_key = payload.client_secret.strip() if payload.client_secret else None
+            effective_app_id = app_id or (None if mode_changed else account.open_client_id)
+            effective_sign_key = bool(
+                sign_key or (not mode_changed and account.open_client_secret)
+            )
+            if not effective_app_id or not effective_sign_key:
+                raise ValueError("Quark OpenAPI AppID and SignKey are required")
+            account.open_client_id = effective_app_id
+            if sign_key:
+                account.open_client_secret = cipher.encrypt(sign_key)
+        else:
+            account.open_client_id = None
+            account.open_client_secret = None
     else:
         client_id = payload.client_id.strip() if payload.client_id else None
         client_secret = payload.client_secret.strip() if payload.client_secret else None
@@ -141,23 +166,42 @@ def configure_open_credential(
     return account
 
 
-def get_open_provider(account: CloudAccount) -> AliyunDriveProvider:
+def get_open_provider(
+    account: CloudAccount, drive_id: str | None = None
+) -> CloudDriveProvider:
     if not account.open_auth_mode or not account.open_refresh_token:
-        raise ValueError("Aliyun Drive OpenAPI is not bound")
+        raise ValueError("OpenAPI is not bound")
     cipher = get_credential_cipher()
     client_secret = cipher.decrypt(account.open_client_secret) if account.open_client_secret else ""
-    return AliyunDriveProvider(
-        refresh_token=cipher.decrypt(account.open_refresh_token),
-        client_id=account.open_client_id or "",
-        client_secret=client_secret,
-        api_base_url=get_settings().aliyundrive_api_base_url,
-        oauth_token_url=(
-            account.open_token_url if account.open_auth_mode in HOSTED_OPEN_AUTH_MODES else None
-        ),
-    )
+    refresh_token = cipher.decrypt(account.open_refresh_token)
+    if account.provider == "aliyundrive":
+        return AliyunDriveProvider(
+            refresh_token=refresh_token,
+            client_id=account.open_client_id or "",
+            client_secret=client_secret,
+            api_base_url=get_settings().aliyundrive_api_base_url,
+            oauth_token_url=(
+                account.open_token_url
+                if account.open_auth_mode in HOSTED_OPEN_AUTH_MODES
+                else None
+            ),
+            drive_id=drive_id,
+        )
+    if account.provider == "quark":
+        if account.open_auth_mode != "openlist" or not account.open_token_url:
+            raise ValueError("Quark OpenAPI requires OpenList mode")
+        if drive_id not in (None, "0"):
+            raise ValueError("Quark OpenAPI currently exposes only its default drive")
+        return QuarkOpenProvider(
+            refresh_token=refresh_token,
+            app_id=account.open_client_id or "",
+            sign_key=client_secret,
+            oauth_token_url=account.open_token_url,
+        )
+    raise ValueError("OpenAPI binding is not available for this provider")
 
 
-def persist_open_provider_token(account: CloudAccount, provider: AliyunDriveProvider) -> bool:
+def persist_open_provider_token(account: CloudAccount, provider: CloudDriveProvider) -> bool:
     rotated_token = provider.consume_refresh_token_update()
     if not rotated_token:
         return False
@@ -175,10 +219,16 @@ async def verify_open_credential(db: Session, account: CloudAccount) -> CloudAcc
     error: Exception | None = None
     try:
         profile = await provider.validate_account()
-        if not account.provider_user_id or not profile.user_id:
+        if account.provider == "aliyundrive" and (
+            not account.provider_user_id or not profile.user_id
+        ):
             raise ValueError("Aliyun Drive did not return user IDs for account matching")
-        if account.provider_user_id != profile.user_id:
-            raise ValueError("OpenAPI token belongs to a different Aliyun Drive account")
+        if (
+            account.provider_user_id
+            and profile.user_id
+            and account.provider_user_id != profile.user_id
+        ):
+            raise ValueError("OpenAPI token belongs to a different cloud account")
         account.open_account_identity = profile.identity
         account.open_status = "active"
         account.open_last_verified_at = utcnow()

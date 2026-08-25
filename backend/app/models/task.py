@@ -45,6 +45,11 @@ class Task(TimestampMixin, Base):
         CheckConstraint("retry_count >= 0", name="ck_tasks_retry_count_nonnegative"),
         CheckConstraint("max_retries >= 0", name="ck_tasks_max_retries_nonnegative"),
         CheckConstraint(
+            "provider_operation_status IS NULL OR provider_operation_status IN "
+            "('intent', 'pending', 'succeeded', 'uncertain')",
+            name="ck_tasks_provider_operation_status",
+        ),
+        CheckConstraint(
             """
             (
                 locked_by IS NULL
@@ -71,6 +76,11 @@ class Task(TimestampMixin, Base):
         ),
         Index("ix_tasks_account_status", "account_id", "status"),
         Index("ix_tasks_lease_recovery", "status", "lease_until"),
+        Index(
+            "ix_tasks_provider_operation",
+            "provider_operation_status",
+            "provider_operation_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -103,6 +113,12 @@ class Task(TimestampMixin, Base):
     last_error_code: Mapped[str | None] = mapped_column(String(100))
     last_error_message: Mapped[str | None] = mapped_column(Text)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_write_intent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    provider_operation_id: Mapped[str | None] = mapped_column(String(255))
+    provider_operation_status: Mapped[str | None] = mapped_column(String(20))
+    provider_result: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
     # v0.1 compatibility fields remain until execution moves to Task Engine v2.
     message: Mapped[str | None] = mapped_column(Text)

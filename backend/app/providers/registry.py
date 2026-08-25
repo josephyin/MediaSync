@@ -5,6 +5,7 @@ from app.core.exceptions import ProviderError
 from app.providers.aliyundrive.private_provider import AliyunDrivePrivateProvider
 from app.providers.aliyundrive.provider import AliyunDriveProvider
 from app.providers.base import CloudDriveProvider
+from app.providers.quark.provider import QuarkPrivateProvider
 
 ProviderFactory = Callable[[str, str | None], CloudDriveProvider]
 
@@ -29,7 +30,16 @@ def _aliyundrive_factory(refresh_token: str, drive_id: str | None = None) -> Clo
     )
 
 
-PROVIDERS: dict[str, ProviderFactory] = {"aliyundrive": _aliyundrive_factory}
+def _quark_factory(cookie: str, drive_id: str | None = None) -> CloudDriveProvider:
+    if drive_id not in (None, "0"):
+        raise ProviderError("Quark Drive currently exposes only its default drive")
+    return QuarkPrivateProvider(cookie=cookie)
+
+
+PROVIDERS: dict[str, ProviderFactory] = {
+    "aliyundrive": _aliyundrive_factory,
+    "quark": _quark_factory,
+}
 
 
 def get_provider(
@@ -63,7 +73,20 @@ def list_provider_types() -> list[dict[str, object]]:
                 else ["account_verify", "folder_browse", "folder_create"]
             ),
         },
-        {"id": "quark", "name": "Quark Drive", "enabled": False, "capabilities": []},
+        {
+            "id": "quark",
+            "name": "Quark Drive",
+            "enabled": True,
+            "status": "experimental",
+            "mode": "private_api",
+            "capabilities": [
+                "account_verify",
+                "share_browse",
+                "folder_browse",
+                "folder_create",
+                "share_save",
+            ],
+        },
         {"id": "115", "name": "115", "enabled": False, "capabilities": []},
         {"id": "onedrive", "name": "OneDrive", "enabled": False, "capabilities": []},
     ]
