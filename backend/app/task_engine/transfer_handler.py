@@ -143,6 +143,10 @@ class TransferTaskHandler:
                     self._mark_failure,
                     payload.file_id,
                     disposition,
+                    retry_exhausted=self._retry_exhausted(
+                        context,
+                        disposition,
+                    ),
                 )
             return self._outcome_for_failure(disposition)
 
@@ -241,7 +245,12 @@ class TransferTaskHandler:
                 summary="Transfer cancelled after a failed provider operation",
             )
 
-        await asyncio.to_thread(self._mark_failure, source.file_id, disposition)
+        await asyncio.to_thread(
+            self._mark_failure,
+            source.file_id,
+            disposition,
+            retry_exhausted=self._retry_exhausted(context, disposition),
+        )
         return self._outcome_for_failure(disposition)
 
     def _load_source(self, payload: TransferPayloadV1) -> _TransferSource:
@@ -341,11 +350,27 @@ class TransferTaskHandler:
         self,
         file_id: int,
         disposition: _FailureDisposition,
+        *,
+        retry_exhausted: bool = False,
     ) -> None:
         with self._session_factory() as session, session.begin():
             file = self._require_file(session, file_id)
-            file.status = "failed" if disposition.status == "failed" else "pending"
+            file.status = (
+                "failed"
+                if disposition.status == "failed" or retry_exhausted
+                else "pending"
+            )
             file.last_error = disposition.safe_message
+
+    @staticmethod
+    def _retry_exhausted(
+        context: TaskExecutionContext,
+        disposition: _FailureDisposition,
+    ) -> bool:
+        return (
+            disposition.status == "retry"
+            and context.task.retry_count >= context.task.max_retries
+        )
 
     def _mark_cancelled(self, file_id: int) -> None:
         with self._session_factory() as session, session.begin():
@@ -431,10 +456,15 @@ class TransferTaskHandler:
                         "cloud-drive write result is uncertain and requires reconciliation"
                     ),
                 )
+            safe_message = (
+                str(exc)
+                if exc.code.startswith("QUARK_")
+                else "cloud-drive request failed and can be retried"
+            )
             return _FailureDisposition(
                 status="retry",
                 error_code=exc.code,
-                safe_message="cloud-drive request failed and can be retried",
+                safe_message=safe_message,
             )
         if isinstance(exc, ProviderError):
             return _FailureDisposition(

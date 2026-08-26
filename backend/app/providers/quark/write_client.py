@@ -6,6 +6,7 @@ from app.core.exceptions import ProviderWriteUncertainError
 from app.providers.base import SaveOperation
 from app.providers.quark.readonly_probe import (
     DRIVE_ORIGIN,
+    DRIVE_PC_ORIGIN,
     QuarkReadOnlyProbe,
     QuarkUpstreamChangedError,
 )
@@ -22,7 +23,7 @@ class QuarkWriteClient(QuarkReadOnlyProbe):
         payload = await self._request(
             "folder creation",
             "POST",
-            DRIVE_ORIGIN,
+            DRIVE_PC_ORIGIN,
             "/1/clouddrive/file",
             params={"pr": "ucpro", "fr": "pc", "uc_param_str": ""},
             body={

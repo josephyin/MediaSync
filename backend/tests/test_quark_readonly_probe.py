@@ -312,6 +312,10 @@ async def test_probe_does_not_treat_unknown_string_code_as_success() -> None:
         await client.aclose()
 
     assert getattr(caught.value, "code", None) == "QUARK_PROBE_FAILED"
+    assert str(caught.value) == (
+        "Quark rejected the account request "
+        "(http_status=200, status=200, code=None)"
+    )
 
 
 async def test_probe_classifies_share_business_error() -> None:

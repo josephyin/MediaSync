@@ -14,6 +14,7 @@ from app.core.exceptions import ProviderRequestError, ProviderWriteUncertainErro
 
 PAN_ORIGIN = "https://pan.quark.cn"
 DRIVE_ORIGIN = "https://drive.quark.cn"
+DRIVE_PC_ORIGIN = "https://drive-pc.quark.cn"
 DEFAULT_TIMEOUT_SECONDS = 15.0
 MAX_COOKIE_LENGTH = 16_384
 MAX_PAGE_SIZE = 50
@@ -213,14 +214,18 @@ class QuarkReadOnlyProbe:
         self,
         stage: str,
         method: Literal["GET", "POST"],
-        origin: Literal["https://pan.quark.cn", "https://drive.quark.cn"],
+        origin: Literal[
+            "https://pan.quark.cn",
+            "https://drive.quark.cn",
+            "https://drive-pc.quark.cn",
+        ],
         path: str,
         *,
         params: dict[str, object] | None = None,
         body: dict[str, object] | None = None,
         write_may_be_accepted: bool = False,
     ) -> dict[str, object]:
-        if origin not in {PAN_ORIGIN, DRIVE_ORIGIN}:
+        if origin not in {PAN_ORIGIN, DRIVE_ORIGIN, DRIVE_PC_ORIGIN}:
             raise QuarkUpstreamChangedError("Quark probe refused an invalid fixed origin")
         if not path.startswith("/") or "//" in path:
             raise QuarkUpstreamChangedError("Quark probe refused an invalid fixed path")
@@ -359,7 +364,10 @@ class QuarkReadOnlyProbe:
             raise QuarkShareInvalidError("Quark share is invalid, protected, or unavailable")
         if any(marker in message for marker in ("login", "cookie", "未登录", "登录")):
             raise QuarkAuthExpiredError("Quark Cookie is expired or unauthorized")
-        raise QuarkProbeError("Quark rejected the read-only probe")
+        raise QuarkProbeError(
+            f"Quark rejected the {stage} request "
+            f"(http_status={http_status}, status={business_status}, code={business_code})"
+        )
 
     @staticmethod
     def _data_object(payload: dict[str, object], stage: str) -> dict[str, object]:

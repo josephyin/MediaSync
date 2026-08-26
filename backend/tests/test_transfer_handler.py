@@ -18,6 +18,7 @@ from app.providers.base import (
     SaveResult,
     ShareInfo,
 )
+from app.providers.quark.readonly_probe import QuarkProbeError
 from app.task_engine.handlers import (
     TaskExecutionContext,
     TaskHandlerRegistry,
@@ -185,6 +186,8 @@ def context(
     subscription_id: int,
     file_id: int,
     cancellation_probe: Callable[[], object] | None = None,
+    retry_count: int = 0,
+    max_retries: int = 3,
 ) -> TaskExecutionContext:
     async def not_cancelled() -> bool:
         return False
@@ -205,8 +208,8 @@ def context(
             subscription_id=subscription_id,
             file_id=file_id,
             claimed_status="running",
-            retry_count=0,
-            max_retries=3,
+            retry_count=retry_count,
+            max_retries=max_retries,
         ),
         worker_id="worker-a",
         lock_token="lock-token",
@@ -532,6 +535,52 @@ async def test_transfer_errors_are_classified_and_sanitized(
     assert file.status == "pending"
     if expected_status == "waiting_credential":
         assert outcome.blocked_reason == "cloud-drive credential requires user action"
+
+
+async def test_exhausted_transfer_retry_marks_file_failed(
+    sessions: sessionmaker[Session],
+) -> None:
+    task_id, subscription_id, file_id = seed_transfer(sessions)
+    provider = FakeTransferProvider(
+        resolve_error=ProviderRequestError("temporary provider failure")
+    )
+
+    outcome = await handler(sessions, provider)(
+        context(
+            task_id=task_id,
+            subscription_id=subscription_id,
+            file_id=file_id,
+            retry_count=3,
+            max_retries=3,
+        )
+    )
+    _task, file, _run_count = load_state(sessions, task_id, file_id)
+
+    assert outcome.status == "retry"
+    assert file.status == "failed"
+    assert file.last_error == "cloud-drive request failed and can be retried"
+
+
+async def test_quark_failure_keeps_sanitized_provider_detail(
+    sessions: sessionmaker[Session],
+) -> None:
+    task_id, subscription_id, file_id = seed_transfer(sessions)
+    detail = "Quark rejected the root request (http_status=200, status=400, code=32003)"
+    provider = FakeTransferProvider(resolve_error=QuarkProbeError(detail))
+
+    outcome = await handler(sessions, provider)(
+        context(
+            task_id=task_id,
+            subscription_id=subscription_id,
+            file_id=file_id,
+        )
+    )
+    _task, file, _run_count = load_state(sessions, task_id, file_id)
+
+    assert outcome.status == "retry"
+    assert outcome.error_code == "QUARK_PROBE_FAILED"
+    assert outcome.error_message == detail
+    assert file.last_error == detail
 
 
 async def test_missing_transfer_source_is_terminal_and_does_not_touch_task(
