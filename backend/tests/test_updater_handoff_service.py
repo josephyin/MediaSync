@@ -153,15 +153,31 @@ def current_container() -> dict[str, Any]:
 
 
 class FakeCreator:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        inspected_host: dict[str, Any] | None = None,
+    ) -> None:
         self.fail = fail
+        self.inspected_host = inspected_host
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.removed: list[str] = []
 
     async def create_container(self, *, name: str, config: dict[str, Any]) -> str:
         self.calls.append((name, config))
         if self.fail:
             raise DockerEngineError("create failed")
         return UPDATER_ID
+
+    async def inspect_container(self, _container_id: str) -> dict[str, Any]:
+        host = self.inspected_host
+        if host is None:
+            host = self.calls[-1][1]["HostConfig"]
+        return {"HostConfig": host}
+
+    async def remove_container(self, container_id: str) -> None:
+        self.removed.append(container_id)
 
 
 def test_candidate_template_keeps_only_rebuild_whitelist() -> None:
@@ -306,7 +322,7 @@ async def test_prepare_writes_private_intent_and_creates_restricted_updater(
         "MaximumRetryCount": 0,
     }
     assert config["HostConfig"]["CapDrop"] == ["ALL"]
-    assert config["HostConfig"]["CapAdd"] == ["DAC_OVERRIDE"]
+    assert config["HostConfig"]["CapAdd"] == ["CAP_DAC_OVERRIDE"]
     assert config["HostConfig"]["SecurityOpt"] == ["no-new-privileges:true"]
     mounts = config["HostConfig"]["Mounts"]
     assert {(item["Source"], item["Target"]) for item in mounts} == {
@@ -330,6 +346,37 @@ async def test_create_failure_removes_unconsumed_handoff(tmp_path: Path) -> None
             current_container=current_container(),
             target=target(),
         )
+
+
+@pytest.mark.asyncio
+async def test_prepare_rejects_and_removes_helper_when_engine_drops_capability(
+    tmp_path: Path,
+) -> None:
+    creator = FakeCreator(
+        inspected_host={
+            "NetworkMode": "none",
+            "ReadonlyRootfs": True,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges:true"],
+        }
+    )
+    service = UpdaterHandoffService(
+        engine=creator,
+        store=UpdaterHandoffStore(directory=str(tmp_path)),
+        socket_path=SOCKET_PATH,
+        nonce_factory=lambda: "fixednonce",
+    )
+
+    with pytest.raises(UpdaterHandoffError, match="未保留 updater 最小权限边界"):
+        await service.prepare(
+            operation_id=OPERATION_ID,
+            current_container=current_container(),
+            target=target(),
+        )
+
+    assert creator.removed == [UPDATER_ID]
+    assert not (tmp_path / f"{OPERATION_ID}.handoff.json").exists()
 
     assert list(tmp_path.iterdir()) == []
 

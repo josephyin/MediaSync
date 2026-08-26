@@ -27,7 +27,7 @@ from app.services.image_target_service import (
 CONTAINER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 UPDATER_COMMAND = ["python", "-m", "app.updater"]
 UPDATER_CAP_DROP = ["ALL"]
-UPDATER_CAP_ADD = ["DAC_OVERRIDE"]
+UPDATER_CAP_ADD = ["CAP_DAC_OVERRIDE"]
 UPDATER_SECURITY_OPT = "no-new-privileges:true"
 UPDATE_ROLE_LABEL = "io.mediasync.update.role"
 UPDATE_OPERATION_LABEL = "io.mediasync.update.operation"
@@ -151,6 +151,10 @@ class ContainerCreator(Protocol):
         config: dict[str, Any],
     ) -> str: ...
 
+    async def inspect_container(self, container_id: str) -> dict[str, Any]: ...
+
+    async def remove_container(self, container_id: str) -> None: ...
+
 
 class UpdaterHandoffStore:
     def __init__(self, *, directory: str) -> None:
@@ -245,11 +249,28 @@ class UpdaterHandoffService:
             socket_path=self.socket_path,
         )
         path = self.store.write(intent)
+        container_id: str | None = None
         try:
             container_id = await self.engine.create_container(name=name, config=config)
+            created = await self.engine.inspect_container(container_id)
+            if not updater_creation_matches(created):
+                raise UpdaterHandoffError("Docker Engine 未保留 updater 最小权限边界")
         except DockerEngineError as exc:
+            if container_id is not None:
+                try:
+                    await self.engine.remove_container(container_id)
+                except DockerEngineError:
+                    pass
             path.unlink(missing_ok=True)
             raise UpdaterHandoffError("无法准备 updater 助手容器") from exc
+        except UpdaterHandoffError:
+            if container_id is not None:
+                try:
+                    await self.engine.remove_container(container_id)
+                except DockerEngineError:
+                    pass
+            path.unlink(missing_ok=True)
+            raise
         return container_id, path
 
 
@@ -375,6 +396,16 @@ def updater_isolation_matches(host: dict[str, Any]) -> bool:
         _capability_list_matches(host.get("CapDrop"), UPDATER_CAP_DROP)
         and _capability_list_matches(host.get("CapAdd"), UPDATER_CAP_ADD)
         and _security_options_match(host.get("SecurityOpt"))
+    )
+
+
+def updater_creation_matches(container: dict[str, Any]) -> bool:
+    host = container.get("HostConfig")
+    return (
+        isinstance(host, dict)
+        and host.get("NetworkMode") == "none"
+        and host.get("ReadonlyRootfs") is True
+        and updater_isolation_matches(host)
     )
 
 
