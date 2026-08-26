@@ -537,7 +537,7 @@ async def test_worker_heartbeat_survives_slow_scan_provider_call(
         {
             ("root", None): RemotePage(items=[file_item("slow-file")]),
         },
-        page_delay=0.35,
+        page_delay=1.25,
     )
     handlers = TaskHandlerRegistry()
     handlers.register("scan", 1, handler(sessions, provider))
@@ -545,8 +545,8 @@ async def test_worker_heartbeat_survives_slow_scan_provider_call(
         session_factory=sessions,
         handlers=handlers,
         worker_id="worker-a",
-        lease_duration=timedelta(milliseconds=200),
-        heartbeat_interval=timedelta(milliseconds=30),
+        lease_duration=timedelta(seconds=1),
+        heartbeat_interval=timedelta(milliseconds=100),
         clock=lambda: datetime.now(UTC),
     )
 
