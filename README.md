@@ -15,7 +15,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前候选版本为 `v0.2.0-rc.23`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘和夸克网盘 Web 私有接口可能随上游更新或账号风控失效。
+> 当前候选版本为 `v0.2.0-rc.24`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘和夸克网盘 Web 私有接口可能随上游更新或账号风控失效。
 
 ## MVP 功能
 
@@ -50,7 +50,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.23
+  josephyjq/mediasync:v0.2.0-rc.24
 ```
 
 访问 `http://NAS_IP:9090`，默认管理员用户名和密码均为 `admin`。首次登录后
@@ -68,7 +68,7 @@ docker run -d \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.23
+  josephyjq/mediasync:v0.2.0-rc.24
 ```
 
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
@@ -96,7 +96,7 @@ SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.23
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.24
 ```
 
 ```bash
@@ -220,7 +220,8 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.20` NAS 受限数据目录快照修复候选版
 - [x] 发布 `v0.2.0-rc.21` Docker updater 身份字段规范化修复候选版
 - [x] 发布 `v0.2.0-rc.22` NAS canonical capability 修复候选版
-- [x] 发布 `v0.2.0-rc.23` 夸克目录转存修复候选版
+- [x] 发布 `v0.2.0-rc.23` 夸克目录转存诊断修复候选版
+- [x] 发布 `v0.2.0-rc.24` 夸克完整路径建目录修复候选版
 - [ ] 发布 `v0.2.0` 正式版
 - [x] 夸克网盘私有 Q2 只读适配
 - [x] 夸克网盘 OpenList OpenAPI 双凭证适配（待真实凭证验收）

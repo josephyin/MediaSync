@@ -2,6 +2,25 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.24] - 2026-08-26
+
+这是夸克完整路径建目录修复候选版本。rc.23 现场重试已经把失败定位到目录创建请求，
+夸克返回 HTTP 400、业务码 `23006`，远端写入尚未开始。
+
+### 修复
+
+- 夸克目录创建改用完整路径契约：固定从根目录 `pdir_fid=0` 提交完整 `dir_path`，
+  并保持 `file_name` 为空。
+- 补充 PC Web 请求使用的动态 `__t` 和 `__dt` 参数，同时保留路径格式、长度和控制
+  字符校验。
+
+### 验证
+
+- 完整后端测试 666 项与 Ruff 检查通过。
+- 修复 PR #154 的后端与迁移、前端生产构建、单镜像与部署契约全部通过。
+- 真实夸克订阅转存仍需在公开 rc.24 镜像发布并现场升级后验收；当前不能宣称线上
+  转存已经成功。
+
 ## [0.2.0-rc.23] - 2026-08-26
 
 这是夸克网盘订阅转存修复候选版本。现场任务证据确认扫描能够发现分享文件，但在
@@ -638,6 +657,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.24]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.24
 [0.2.0-rc.23]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.23
 [0.2.0-rc.22]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.22
 [0.2.0-rc.21]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.21
