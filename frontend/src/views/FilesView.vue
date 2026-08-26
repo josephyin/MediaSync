@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Page } from '../api/client'
 import type { CloudFile, Subscription } from '../api/types'
 import AppIcon from '../components/AppIcon.vue'
@@ -16,6 +16,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const loading = ref(false)
 const retryingId = ref<number | null>(null)
+const bulkRetrying = ref(false)
 const selectedFile = ref<CloudFile | null>(null)
 const detailVisible = ref(false)
 
@@ -70,6 +71,46 @@ async function retry(id: number) {
     retryingId.value = null
   }
 }
+interface BulkRetryResult {
+  matched_count: number
+  enqueued_count: number
+  skipped_count: number
+}
+function filteredParams(statusFilter?: string) {
+  const params = new URLSearchParams()
+  if (statusFilter) params.set('status', statusFilter)
+  if (query.value.trim()) params.set('query', query.value.trim())
+  if (subscriptionId.value) params.set('subscription_id', String(subscriptionId.value))
+  return params
+}
+async function retryFailed() {
+  bulkRetrying.value = true
+  try {
+    const previewParams = filteredParams('failed')
+    previewParams.set('page', '1')
+    previewParams.set('page_size', '1')
+    const preview = await api<Page<CloudFile>>(`/files?${previewParams}`)
+    if (!preview.total) {
+      ElMessage.info('当前筛选范围内没有失败文件')
+      return
+    }
+    await ElMessageBox.confirm(
+      `将把当前筛选范围内的 ${preview.total} 个失败文件重新加入转存队列，是否继续？`,
+      '批量重新尝试',
+      { type: 'warning', confirmButtonText: '全部重新尝试', cancelButtonText: '取消' },
+    )
+    const result = await api<BulkRetryResult>(`/files/retry-failed?${filteredParams()}`, { method: 'POST' })
+    const skipped = result.skipped_count ? `，跳过 ${result.skipped_count} 个已有任务` : ''
+    ElMessage.success(`已将 ${result.enqueued_count} 个文件加入重试队列${skipped}`)
+    page.value = 1
+    await load()
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error instanceof Error ? error.message : '批量重试提交失败')
+  } finally {
+    bulkRetrying.value = false
+  }
+}
 onMounted(async () => {
   try { subscriptions.value = (await api<Page<Subscription>>('/subscriptions?page_size=100')).items }
   catch { /* 文件列表仍可独立使用 */ }
@@ -101,7 +142,12 @@ onMounted(async () => {
           </el-select>
           <el-button type="primary" plain @click="applyFilters">查询</el-button>
         </div>
-        <el-button text @click="clearFilters">重置筛选</el-button>
+        <div class="toolbar-actions">
+          <el-button v-if="!status || status === 'failed'" type="primary" :loading="bulkRetrying" @click="retryFailed">
+            批量重试失败文件
+          </el-button>
+          <el-button text @click="clearFilters">重置筛选</el-button>
+        </div>
       </div>
 
       <div class="table-wrap">
@@ -226,6 +272,7 @@ onMounted(async () => {
 
 <style scoped>
 .file-filters { flex: 1; }
+.toolbar-actions { display: flex; align-items: center; }
 .file-filters .el-input { width: min(320px, 30vw); }
 .file-filters .el-select { width: 170px; }
 .file-cell { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -255,5 +302,6 @@ onMounted(async () => {
 .detail-retry { width: 100%; margin-top: 18px; }
 @media (max-width: 820px) {
   .file-filters, .file-filters .el-input, .file-filters .el-select { width: 100%; }
+  .toolbar-actions { width: 100%; justify-content: flex-end; }
 }
 </style>
