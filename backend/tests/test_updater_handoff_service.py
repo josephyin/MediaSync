@@ -23,6 +23,7 @@ from app.services.updater_handoff_service import (
     UpdaterHandoffService,
     UpdaterHandoffStore,
     extract_candidate_template,
+    updater_isolation_matches,
 )
 
 CONTAINER_ID = "a" * 64
@@ -31,6 +32,49 @@ SOURCE_IMAGE_ID = f"sha256:{'e' * 64}"
 OPERATION_ID = "12345678-1234-4234-9234-123456789abc"
 DIGEST = f"sha256:{'c' * 64}"
 SOCKET_PATH = "/var/run/docker.sock"
+
+
+@pytest.mark.parametrize(
+    ("cap_add", "security_opt"),
+    [
+        (["DAC_OVERRIDE"], ["no-new-privileges:true"]),
+        (["CAP_DAC_OVERRIDE"], ["no-new-privileges"]),
+        (["CAP_DAC_OVERRIDE"], ["no-new-privileges=true"]),
+    ],
+)
+def test_updater_isolation_accepts_create_and_inspect_forms(
+    cap_add: list[str],
+    security_opt: list[str],
+) -> None:
+    assert updater_isolation_matches(
+        {
+            "CapDrop": ["ALL"],
+            "CapAdd": cap_add,
+            "SecurityOpt": security_opt,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("cap_add", "security_opt"),
+    [
+        (["CAP_DAC_OVERRIDE", "CAP_SYS_ADMIN"], ["no-new-privileges"]),
+        (["CAP_SYS_ADMIN"], ["no-new-privileges"]),
+        (["CAP_DAC_OVERRIDE"], ["no-new-privileges:false"]),
+        (["CAP_DAC_OVERRIDE"], ["no-new-privileges", "seccomp=unconfined"]),
+    ],
+)
+def test_updater_isolation_rejects_expanded_or_weakened_boundary(
+    cap_add: list[str],
+    security_opt: list[str],
+) -> None:
+    assert not updater_isolation_matches(
+        {
+            "CapDrop": ["ALL"],
+            "CapAdd": cap_add,
+            "SecurityOpt": security_opt,
+        }
+    )
 
 
 def target() -> VerifiedImageTarget:

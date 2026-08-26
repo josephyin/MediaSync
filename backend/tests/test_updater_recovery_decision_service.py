@@ -180,8 +180,8 @@ def coordinator_container(
             "NetworkMode": "none",
             "ReadonlyRootfs": True,
             "CapDrop": ["ALL"],
-            "CapAdd": ["DAC_OVERRIDE"],
-            "SecurityOpt": ["no-new-privileges:true"],
+            "CapAdd": ["CAP_DAC_OVERRIDE"],
+            "SecurityOpt": ["no-new-privileges"],
         },
         "State": {"Running": True},
         "Mounts": [
@@ -390,6 +390,8 @@ async def test_hostname_matching_wrong_role_is_coordinator_conflict() -> None:
         ("CapAdd", []),
         ("CapAdd", ["DAC_OVERRIDE", "SYS_ADMIN"]),
         ("SecurityOpt", []),
+        ("SecurityOpt", ["no-new-privileges:false"]),
+        ("SecurityOpt", ["no-new-privileges", "seccomp=unconfined"]),
     ],
 )
 async def test_coordinator_requires_exact_minimum_capability_boundary(

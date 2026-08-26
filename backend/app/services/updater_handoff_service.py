@@ -28,6 +28,7 @@ CONTAINER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 UPDATER_COMMAND = ["python", "-m", "app.updater"]
 UPDATER_CAP_DROP = ["ALL"]
 UPDATER_CAP_ADD = ["DAC_OVERRIDE"]
+UPDATER_SECURITY_OPT = "no-new-privileges:true"
 UPDATE_ROLE_LABEL = "io.mediasync.update.role"
 UPDATE_OPERATION_LABEL = "io.mediasync.update.operation"
 UPDATER_ROLE = "updater"
@@ -357,7 +358,7 @@ def build_updater_create_config(
             "ReadonlyRootfs": True,
             "CapDrop": list(UPDATER_CAP_DROP),
             "CapAdd": list(UPDATER_CAP_ADD),
-            "SecurityOpt": ["no-new-privileges:true"],
+            "SecurityOpt": [UPDATER_SECURITY_OPT],
             "Mounts": [
                 SafeMount(data.type, data.source, "/data", False).docker_mount(),
                 SafeMount(
@@ -365,6 +366,40 @@ def build_updater_create_config(
                 ).docker_mount(),
             ],
         },
+    }
+
+
+def updater_isolation_matches(host: dict[str, Any]) -> bool:
+    """Compare the updater boundary after Docker Engine inspect normalization."""
+    return (
+        _capability_list_matches(host.get("CapDrop"), UPDATER_CAP_DROP)
+        and _capability_list_matches(host.get("CapAdd"), UPDATER_CAP_ADD)
+        and _security_options_match(host.get("SecurityOpt"))
+    )
+
+
+def _capability_list_matches(actual: object, expected: list[str]) -> bool:
+    if not isinstance(actual, list) or len(actual) != len(expected):
+        return False
+    if not all(isinstance(item, str) for item in actual):
+        return False
+    return [_normalize_capability(item) for item in actual] == [
+        _normalize_capability(item) for item in expected
+    ]
+
+
+def _normalize_capability(value: str) -> str:
+    normalized = value.upper()
+    return normalized.removeprefix("CAP_")
+
+
+def _security_options_match(actual: object) -> bool:
+    if not isinstance(actual, list) or len(actual) != 1:
+        return False
+    return actual[0] in {
+        UPDATER_SECURITY_OPT,
+        "no-new-privileges",
+        "no-new-privileges=true",
     }
 
 
