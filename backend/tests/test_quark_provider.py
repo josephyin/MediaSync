@@ -207,6 +207,7 @@ async def test_create_folder_and_resumable_share_save_protocol() -> None:
                 },
             )
         if request.url.path == "/1/clouddrive/file":
+            assert request.url.host == "drive-pc.quark.cn"
             assert json.loads(request.content) == {
                 "dir_init_lock": False,
                 "dir_path": "",
