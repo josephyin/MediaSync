@@ -455,3 +455,81 @@ def test_file_retry_api_creates_successor_task(
         assert successor.id != predecessor.id
         assert successor.status == "pending"
         assert successor.idempotency_key == (f"transfer-retry:{file_id}:{predecessor_id}")
+
+
+def test_bulk_file_retry_uses_filters_and_skips_active_tasks(
+    sessions: sessionmaker[Session],
+) -> None:
+    with sessions() as session, session.begin():
+        subscription, first = seed_subscription_and_file(session)
+        first.relative_path = "season/episode-1.mkv"
+        second = CloudFile(
+            subscription_id=subscription.id,
+            remote_file_id="api-file-2",
+            parent_remote_file_id="root",
+            filename="episode-2.mkv",
+            relative_path="season/episode-2.mkv",
+            item_type="file",
+            size=2048,
+            fingerprint="api-fingerprint-2",
+            status="failed",
+            first_seen_at=NOW,
+            last_seen_at=NOW,
+            last_error="failed",
+        )
+        session.add(second)
+        session.flush()
+        session.add(
+            Task(
+                account_id=subscription.cloud_account_id,
+                subscription_id=subscription.id,
+                file_id=second.id,
+                type="transfer",
+                trigger_type="scheduled",
+                status="retry",
+                payload_version=1,
+                payload={},
+                idempotency_key="active-transfer",
+            )
+        )
+        first_id = first.id
+        second_id = second.id
+        subscription_id = subscription.id
+
+    with sessions() as session:
+        result = files_api.retry_failed_files(
+            db=session,
+            _=None,  # type: ignore[arg-type]
+            subscription_id=subscription_id,
+            query="season/",
+        )
+
+    assert result.matched_count == 2
+    assert result.enqueued_count == 1
+    assert result.skipped_count == 1
+    with sessions() as session:
+        first = session.get(CloudFile, first_id)
+        second = session.get(CloudFile, second_id)
+        assert first is not None and first.status == "pending"
+        assert second is not None and second.status == "failed"
+        successor = session.scalar(
+            select(Task).where(Task.file_id == first_id, Task.trigger_type == "retry")
+        )
+        assert successor is not None
+
+
+def test_bulk_file_retry_requires_narrower_filter_above_limit(
+    sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with sessions() as session, session.begin():
+        seed_subscription_and_file(session)
+    monkeypatch.setattr(files_api, "BULK_RETRY_LIMIT", 0)
+
+    with sessions() as session, pytest.raises(HTTPException) as caught:
+        files_api.retry_failed_files(
+            db=session,
+            _=None,  # type: ignore[arg-type]
+        )
+
+    assert caught.value.status_code == 409

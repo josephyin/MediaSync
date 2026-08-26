@@ -25,3 +25,9 @@ class CloudFileRead(BaseModel):
     last_error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class BulkRetryFilesRead(BaseModel):
+    matched_count: int
+    enqueued_count: int
+    skipped_count: int
