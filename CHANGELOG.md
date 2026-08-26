@@ -2,6 +2,35 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.21] - 2026-08-26
+
+这是 Docker Engine updater 身份字段规范化兼容修复候选版本。rc.20 现场更新已
+确认 updater 创建成功，但 Engine Inspect 把创建请求中的 `DAC_OVERRIDE` 返回为
+`CAP_DAC_OVERRIDE`，并把 `no-new-privileges:true` 返回为
+`no-new-privileges`。此前的原始字符串完全匹配因此误判合法 updater 身份，助手
+容器被 `unless-stopped` 策略反复重启。
+
+### 修复
+
+- updater 身份校验在比较前规范化 Linux capability 的等价 `CAP_` 前缀。
+- `no-new-privileges:true`、`no-new-privileges=true` 与 Docker Inspect 返回的
+  `no-new-privileges` 作为同一安全选项处理。
+- 协调执行和恢复决策共用同一隔离边界校验，避免两条路径产生不一致判断。
+
+### 安全边界
+
+- 仍只接受唯一 `DAC_OVERRIDE`，要求 `CapDrop=ALL`，拒绝 `SYS_ADMIN` 等任何
+  额外 capability。
+- 仍只接受启用状态的 `no-new-privileges`；禁用、缺失或追加其他安全选项均拒绝。
+- `NetworkMode=none`、只读根文件系统、挂载和设备映射边界均未放宽。
+
+### 验证
+
+- updater 定向测试 148 项、完整后端测试 663 项与 Ruff 检查通过。
+- 使用 rc.20 镜像创建真实 Docker 容器，Inspect 返回规范化字段后由修复代码验证为
+  `matched=true`；测试容器随后删除。
+- 修复 PR #148 的后端与迁移、前端生产构建、单镜像与部署契约全部通过。
+
 ## [0.2.0-rc.20] - 2026-08-26
 
 这是 NAS 受限数据目录快照兼容修复候选版本。现场确认部分 NAS 将宿主数据目录
@@ -558,6 +587,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.21]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.21
 [0.2.0-rc.20]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.20
 [0.2.0-rc.19]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.19
 [0.2.0-rc.18]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.18
