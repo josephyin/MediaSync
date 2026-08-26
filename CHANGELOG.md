@@ -2,6 +2,33 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.22] - 2026-08-26
+
+这是 NAS Docker Engine canonical capability 兼容修复候选版本。现场 Inspect 证据
+确认该 Engine 会静默丢弃创建请求中的 `DAC_OVERRIDE`，使 updater 实际配置变成
+`CapAdd=null`。rc.21 的严格身份校验因此正确拒绝 helper，但无法完成更新。
+
+### 修复
+
+- updater 创建请求改用 canonical 名称 `CAP_DAC_OVERRIDE`，兼容现场 NAS Engine。
+- helper 创建后、启动前回读 Inspect，确认网络隔离、只读根文件系统、
+  `CapDrop=ALL`、唯一 `CAP_DAC_OVERRIDE` 和 `no-new-privileges` 均被保留。
+- Engine 静默丢弃任一最小权限配置时，删除未启动 helper 与未消费 handoff，让主
+  MediaSync 直接记录准备失败，不再进入 helper 重启循环。
+
+### 安全边界
+
+- canonical 名称不增加权限，仍只恢复快照访问所需的 `DAC_OVERRIDE`。
+- updater 不继承设备映射，候选容器的普通设备映射验证与 `DeviceRequests` 拒绝策略
+  保持不变。
+
+### 验证
+
+- updater 定向测试 56 项、完整后端测试 664 项与 Ruff 检查通过。
+- 新增 Engine 返回 `CapAdd=null` 的回归测试，验证 helper 在启动前被删除且 handoff
+  被清理。
+- 修复 PR #150 的后端与迁移、前端生产构建、单镜像与部署契约全部通过。
+
 ## [0.2.0-rc.21] - 2026-08-26
 
 这是 Docker Engine updater 身份字段规范化兼容修复候选版本。rc.20 现场更新已
@@ -587,6 +614,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.22]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.22
 [0.2.0-rc.21]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.21
 [0.2.0-rc.20]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.20
 [0.2.0-rc.19]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.19
