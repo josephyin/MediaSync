@@ -27,7 +27,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.22
+  josephyjq/mediasync:v0.2.0-rc.23
 ```
 
 打开 `http://NAS_IP:9090`，默认用户名和密码均为 `admin`。首次登录后必须改为
