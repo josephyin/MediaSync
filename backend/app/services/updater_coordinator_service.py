@@ -22,6 +22,8 @@ from app.services.updater_candidate_service import UpdaterCandidateService
 from app.services.updater_handoff_service import (
     UPDATE_OPERATION_LABEL,
     UPDATE_ROLE_LABEL,
+    UPDATER_CAP_ADD,
+    UPDATER_CAP_DROP,
     UPDATER_COMMAND,
     UPDATER_ROLE,
     validate_operation_id,
@@ -372,6 +374,9 @@ def coordinator_identity_matches(
         and config.get("Image") == document.target_image
         and host.get("NetworkMode") == "none"
         and host.get("ReadonlyRootfs") is True
+        and host.get("CapDrop") == UPDATER_CAP_DROP
+        and host.get("CapAdd") == UPDATER_CAP_ADD
+        and host.get("SecurityOpt") == ["no-new-privileges:true"]
         and targets == {"/data", socket_path}
         and data_mount is not None
         and isinstance(actual_data, dict)

@@ -19,6 +19,8 @@ from app.services.updater_handoff_service import (
     CANDIDATE_ROLE,
     UPDATE_OPERATION_LABEL,
     UPDATE_ROLE_LABEL,
+    UPDATER_CAP_ADD,
+    UPDATER_CAP_DROP,
     UPDATER_COMMAND,
     UPDATER_ROLE,
 )
@@ -426,6 +428,9 @@ def _valid_coordinator(
         and _config(container).get("Image") == result.target_image == document.target_image
         and host.get("NetworkMode") == "none"
         and host.get("ReadonlyRootfs") is True
+        and host.get("CapDrop") == UPDATER_CAP_DROP
+        and host.get("CapAdd") == UPDATER_CAP_ADD
+        and host.get("SecurityOpt") == ["no-new-privileges:true"]
         and targets == {"/data", socket_path}
         and _mount_matches(container, document=document, target="/data")
     )

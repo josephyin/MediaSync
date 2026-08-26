@@ -112,6 +112,9 @@ def helper_container(
         "HostConfig": {
             "NetworkMode": "none",
             "ReadonlyRootfs": True,
+            "CapDrop": ["ALL"],
+            "CapAdd": ["DAC_OVERRIDE"],
+            "SecurityOpt": ["no-new-privileges:true"],
             "RestartPolicy": {"Name": policy, "MaximumRetryCount": 0},
         },
         "State": {"Running": running},

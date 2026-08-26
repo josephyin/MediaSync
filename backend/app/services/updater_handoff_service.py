@@ -26,6 +26,8 @@ from app.services.image_target_service import (
 
 CONTAINER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 UPDATER_COMMAND = ["python", "-m", "app.updater"]
+UPDATER_CAP_DROP = ["ALL"]
+UPDATER_CAP_ADD = ["DAC_OVERRIDE"]
 UPDATE_ROLE_LABEL = "io.mediasync.update.role"
 UPDATE_OPERATION_LABEL = "io.mediasync.update.operation"
 UPDATER_ROLE = "updater"
@@ -353,7 +355,8 @@ def build_updater_create_config(
             },
             "NetworkMode": "none",
             "ReadonlyRootfs": True,
-            "CapDrop": ["ALL"],
+            "CapDrop": list(UPDATER_CAP_DROP),
+            "CapAdd": list(UPDATER_CAP_ADD),
             "SecurityOpt": ["no-new-privileges:true"],
             "Mounts": [
                 SafeMount(data.type, data.source, "/data", False).docker_mount(),

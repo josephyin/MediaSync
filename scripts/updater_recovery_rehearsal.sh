@@ -64,6 +64,7 @@ directory.mkdir(parents=True, exist_ok=True)
 handle = open(directory / "updater.lock", "a+")
 fcntl.flock(handle, fcntl.LOCK_EX)
 (directory / "rehearsal-owner").write_text(os.environ["MEDIASYNC_REHEARSAL_TOKEN"], encoding="utf-8")
+pathlib.Path("/data").chmod(0)
 crash = directory / "rehearsal-crash"
 while True:
     if crash.exists():
@@ -92,6 +93,8 @@ docker run -d \
     --no-healthcheck \
     --network none \
     --read-only \
+    --cap-drop ALL \
+    --cap-add DAC_OVERRIDE \
     -e MEDIASYNC_REHEARSAL_TOKEN=initial \
     -v "$volume:/data" \
     "$image" \
@@ -99,7 +102,7 @@ docker run -d \
 
 attempt=0
 until [ "$(docker inspect -f '{{.State.Running}}' "$owner")" = "true" ] \
-    && [ "$(docker exec "$owner" sh -c 'cat /data/update/rehearsal-owner')" = "initial" ]
+    && [ "$(docker exec "$owner" sh -c 'cat /data/update/rehearsal-owner' 2>/dev/null)" = "initial" ]
 do
     attempt=$((attempt + 1))
     if [ "$attempt" -ge 30 ]; then
@@ -113,6 +116,7 @@ done
 set +e
 docker run --name "$contender" --network none --read-only \
     --no-healthcheck \
+    --cap-drop ALL --cap-add DAC_OVERRIDE \
     -v "$volume:/data" "$image" python -c "$contender_program" >/dev/null 2>&1
 contender_exit=$?
 set -e
@@ -142,6 +146,7 @@ done
 set +e
 docker run --name "$contender" --network none --read-only \
     --no-healthcheck \
+    --cap-drop ALL --cap-add DAC_OVERRIDE \
     -v "$volume:/data" "$image" python -c "$contender_program" >/dev/null 2>&1
 restart_contender_exit=$?
 set -e
@@ -157,9 +162,16 @@ docker stop -t 1 "$owner" >/dev/null
 
 docker run --name "$released" --network none --read-only \
     --no-healthcheck \
+    --cap-drop ALL --cap-add DAC_OVERRIDE \
     -v "$volume:/data" "$image" python -c "$released_program" >/dev/null
 test "$(docker inspect -f '{{.State.ExitCode}}' "$released")" = "0"
-test "$(docker run --rm --no-healthcheck -v "$volume:/data:ro" "$image" sh -c 'cat /data/update/rehearsal-released')" = "released"
+test "$(docker run --rm --no-healthcheck \
+    --cap-drop ALL --cap-add DAC_OVERRIDE \
+    -v "$volume:/data:ro" "$image" \
+    sh -c 'cat /data/update/rehearsal-released')" = "released"
+test "$(docker run --rm --no-healthcheck \
+    --cap-drop ALL --cap-add DAC_OVERRIDE \
+    -v "$volume:/data:ro" "$image" stat -c '%a' /data)" = "0"
 
 image_id=$(docker image inspect "$image" --format '{{.Id}}')
 repo_digests=$(docker image inspect "$image" --format '{{json .RepoDigests}}')
@@ -182,6 +194,8 @@ printf '%s\n' \
     '    "lock_reacquired_after_restart": true,' \
     '    "restart_policy_disarmed": true,' \
     '    "lock_released_after_stop": true,' \
+    '    "restricted_data_permissions": true,' \
+    '    "minimum_dac_override_only": true,' \
     "    \"restart_count\": $restart_count" \
     '  }' \
     '}' > "$report_path"

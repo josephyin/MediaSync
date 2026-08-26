@@ -262,6 +262,8 @@ async def test_prepare_writes_private_intent_and_creates_restricted_updater(
         "MaximumRetryCount": 0,
     }
     assert config["HostConfig"]["CapDrop"] == ["ALL"]
+    assert config["HostConfig"]["CapAdd"] == ["DAC_OVERRIDE"]
+    assert config["HostConfig"]["SecurityOpt"] == ["no-new-privileges:true"]
     mounts = config["HostConfig"]["Mounts"]
     assert {(item["Source"], item["Target"]) for item in mounts} == {
         ("mediasync-data", "/data"),
