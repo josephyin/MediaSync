@@ -2,6 +2,37 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.20] - 2026-08-26
+
+这是 NAS 受限数据目录快照兼容修复候选版本。现场确认部分 NAS 将宿主数据目录
+映射为容器内 mode `000`、非 root 所有者，SQLite 文件同样为 `000`。Appliance
+依靠 root 的 `DAC_OVERRIDE` 正常运行，而此前 updater 删除全部 capabilities 后
+无法穿过 `/data`，因此在创建数据快照阶段安全回滚。
+
+### 修复
+
+- updater 继续删除全部 Linux capabilities，但精确恢复快照和回滚所必需的
+  `DAC_OVERRIDE`。
+- 恢复协调器把 `CapDrop=ALL`、唯一 `CapAdd=DAC_OVERRIDE` 和
+  `no-new-privileges` 纳入严格身份校验；缺少能力或额外加入 `SYS_ADMIN` 等能力均
+  拒绝自动恢复。
+- 不修改 NAS 宿主目录权限，不要求用户手工 `chmod` SQLite 文件。
+
+### 安全边界
+
+- updater 仍保持 `NetworkMode=none`、只读根文件系统和 `no-new-privileges`。
+- updater 只挂载 `/data` 与 Docker Socket，不继承 MediaSync 的设备映射。
+- 候选 MediaSync 容器仍只继承经过严格校验的普通 `HostConfig.Devices`；复杂
+  `DeviceRequests` 继续拒绝。
+
+### 验证
+
+- 后端 654 项测试和 Ruff 检查通过。
+- Docker 恢复演练把测试卷根目录设置为 mode `000`，并在仅保留
+  `DAC_OVERRIDE` 的条件下验证持久锁、helper 崩溃重启、恢复写入和安全退出。
+- 修复 PR #146 的后端与迁移、前端生产构建、单镜像与部署契约全部通过；
+  rc.20 标签仍需以发布提交的 CI 为准。
+
 ## [0.2.0-rc.19] - 2026-08-25
 
 这是 Web 一键更新自动回滚原因可见性修复候选版本。rc.17 向 rc.18 的现场升级
@@ -527,6 +558,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.20]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.20
 [0.2.0-rc.19]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.19
 [0.2.0-rc.18]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.18
 [0.2.0-rc.17]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.17
