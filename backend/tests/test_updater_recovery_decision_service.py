@@ -176,7 +176,13 @@ def coordinator_container(
                 "io.mediasync.update.operation": OPERATION_ID,
             },
         },
-        "HostConfig": {"NetworkMode": "none", "ReadonlyRootfs": True},
+        "HostConfig": {
+            "NetworkMode": "none",
+            "ReadonlyRootfs": True,
+            "CapDrop": ["ALL"],
+            "CapAdd": ["DAC_OVERRIDE"],
+            "SecurityOpt": ["no-new-privileges:true"],
+        },
         "State": {"Running": True},
         "Mounts": [
             {
@@ -357,6 +363,41 @@ async def test_current_coordinator_requires_unique_hostname_prefix() -> None:
 async def test_hostname_matching_wrong_role_is_coordinator_conflict() -> None:
     coordinator = coordinator_container()
     coordinator["Config"]["Labels"]["io.mediasync.update.role"] = "candidate"
+
+    observed = await UpdaterDockerIdentityService(
+        engine=FakeEngine([
+            source_container(),
+            candidate_container(),
+            coordinator,
+        ]),
+        socket_path=SOCKET_PATH,
+    ).observe(
+        document=handoff(),
+        result=result(),
+        marker=marker(),
+        hostname=COORDINATOR_ID[:12],
+    )
+
+    assert observed.coordinator.status == "conflict"
+    assert observed.coordinator.reason_code == "coordinator_identity_conflict"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("CapDrop", []),
+        ("CapAdd", []),
+        ("CapAdd", ["DAC_OVERRIDE", "SYS_ADMIN"]),
+        ("SecurityOpt", []),
+    ],
+)
+async def test_coordinator_requires_exact_minimum_capability_boundary(
+    field: str,
+    value: list[str],
+) -> None:
+    coordinator = coordinator_container()
+    coordinator["HostConfig"][field] = value
 
     observed = await UpdaterDockerIdentityService(
         engine=FakeEngine([

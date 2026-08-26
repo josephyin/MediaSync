@@ -172,6 +172,8 @@ jobs:
             and .checks.lock_reacquired_after_restart == true
             and .checks.restart_policy_disarmed == true
             and .checks.lock_released_after_stop == true
+            and .checks.restricted_data_permissions == true
+            and .checks.minimum_dac_override_only == true
             and .checks.restart_count >= 1
           ' "${RUNNER_TEMP}"/updater-rehearsals/*.json
 

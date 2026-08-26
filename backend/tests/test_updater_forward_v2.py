@@ -119,6 +119,9 @@ class MutableEngine:
                 "HostConfig": {
                     "NetworkMode": "none",
                     "ReadonlyRootfs": True,
+                    "CapDrop": ["ALL"],
+                    "CapAdd": ["DAC_OVERRIDE"],
+                    "SecurityOpt": ["no-new-privileges:true"],
                 },
                 "State": {"Running": True},
                 "Mounts": [

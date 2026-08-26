@@ -190,6 +190,11 @@ Updater 停止旧容器后，必须为下列内容创建同一时点的一致性
 
 ### 5.6 临时 updater 助手
 
+助手使用只读根文件系统和 `NetworkMode=none`，删除全部 Linux capabilities 后只
+恢复 `DAC_OVERRIDE`。该单一能力用于访问部分 NAS 以 `000` 模式映射、但由当前
+Appliance root 正常使用的 `/data` 与 SQLite 文件；不得增加 `SYS_ADMIN` 等其他能力，
+也不得继承 MediaSync 的设备映射。
+
 当前容器不能在停止自身后继续执行 Docker API。因此切换必须由临时 updater
 助手完成：
 

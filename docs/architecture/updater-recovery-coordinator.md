@@ -19,6 +19,8 @@
 - 只挂载 `/data` 与 Docker Socket；
 - `NetworkMode=none`；
 - `ReadonlyRootfs=true`；
+- 删除全部 Linux capabilities，只恢复访问 NAS `000` ACL 映射数据所必需的
+  `DAC_OVERRIDE`；
 - 不使用 `AutoRemove`；
 - restart policy 为 `unless-stopped`；
 - 标签必须包含 updater 角色和精确 operation ID。
