@@ -39,7 +39,7 @@ mkdir -p /volume1/docker/mediasync
 拉取并启动精确版本：
 
 ```bash
-docker pull josephyjq/mediasync:v0.2.0-rc.23
+docker pull josephyjq/mediasync:v0.2.0-rc.24
 
 docker run -d \
   --name mediasync \
@@ -48,7 +48,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.23
+  josephyjq/mediasync:v0.2.0-rc.24
 ```
 
 打开：
@@ -71,7 +71,7 @@ docker run -d \
   -e ADMIN_PASSWORD='请替换为强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.23
+  josephyjq/mediasync:v0.2.0-rc.24
 ```
 
 显式密码不会写入日志。Shell 历史可能记录命令，介意时请使用环境变量文件或
@@ -82,7 +82,7 @@ NAS 的环境变量表单。
 
 ```bash
 MEDIASYNC_DATA_PATH=/volume1/docker/mediasync \
-MEDIASYNC_IMAGE=josephyjq/mediasync:v0.2.0-rc.23 \
+MEDIASYNC_IMAGE=josephyjq/mediasync:v0.2.0-rc.24 \
 docker compose -f compose.appliance.yml up -d
 ```
 
@@ -226,7 +226,7 @@ docker run -d \
   -e ADMIN_PASSWORD='rc.2 原值' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.23
+  josephyjq/mediasync:v0.2.0-rc.24
 ```
 
 密钥持久化成功后，后续重建容器可以不再重复传入两个加密密钥。
