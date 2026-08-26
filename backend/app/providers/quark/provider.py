@@ -313,7 +313,7 @@ class QuarkPrivateProvider:
             max_retries=0,
         )
         try:
-            folder_id = await client.create_folder(parent.folder_id, name)
+            folder_id = await client.create_folder(parent.path, name)
         finally:
             await self._finish_probe(client)
         return FolderRef(

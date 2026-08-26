@@ -15,22 +15,34 @@ from app.providers.quark.readonly_probe import (
 class QuarkWriteClient(QuarkReadOnlyProbe):
     """Minimal non-replaying write client for the experimental Quark Web API."""
 
-    async def create_folder(self, parent_id: str, name: str) -> str:
-        if not parent_id or len(parent_id) > 256:
-            raise ValueError("Invalid Quark Drive parent folder ID")
+    async def create_folder(self, parent_path: str, name: str) -> str:
+        if (
+            not parent_path.startswith("/")
+            or "//" in parent_path
+            or len(parent_path) > 4096
+            or any(ord(char) < 32 for char in parent_path)
+        ):
+            raise ValueError("Invalid Quark Drive parent folder path")
         if not name or name in {".", ".."} or "/" in name or len(name) > 255:
             raise ValueError("Invalid Quark Drive folder name")
+        full_path = f"{parent_path.rstrip('/')}/{name}"
         payload = await self._request(
             "folder creation",
             "POST",
             DRIVE_PC_ORIGIN,
             "/1/clouddrive/file",
-            params={"pr": "ucpro", "fr": "pc", "uc_param_str": ""},
+            params={
+                "pr": "ucpro",
+                "fr": "pc",
+                "uc_param_str": "",
+                "__dt": 1_000,
+                "__t": int(time.time() * 1_000),
+            },
             body={
                 "dir_init_lock": False,
-                "dir_path": "",
-                "file_name": name,
-                "pdir_fid": parent_id,
+                "dir_path": full_path,
+                "file_name": "",
+                "pdir_fid": "0",
             },
             write_may_be_accepted=True,
         )
