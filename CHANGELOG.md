@@ -2,6 +2,30 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.23] - 2026-08-26
+
+这是夸克网盘订阅转存修复候选版本。现场任务证据确认扫描能够发现分享文件，但在
+自动创建目标子目录时连续失败，任务最终失败后文件记录仍错误停留在“等待中”。
+
+### 修复
+
+- 夸克文件夹创建请求改用 PC Web 文件端点 `drive-pc.quark.cn`，分享读取、转存提交
+  和任务查询继续使用已验证端点。
+- 转存任务耗尽重试预算时同步把文件记录标记为失败，恢复“重新尝试”入口。
+- 夸克请求失败保留脱敏后的执行阶段、HTTP 状态和业务状态码，不再只显示通用错误。
+
+### 安全边界
+
+- 新增域名仍是固定的夸克 HTTPS 主机，不接受运行时提供的任意 origin 或 path。
+- 错误信息不包含 Cookie、分享口令、分享 token 或远端操作 ID。
+- 已接收但结果不确定的远端写入仍禁止盲目重放。
+
+### 验证
+
+- 完整后端测试 666 项与 Ruff 检查通过。
+- 修复 PR #152 的后端与迁移、前端生产构建、单镜像与部署契约全部通过。
+- 现场升级后的夸克自动建目录和订阅转存仍需使用公开 rc.23 镜像验收。
+
 ## [0.2.0-rc.22] - 2026-08-26
 
 这是 NAS Docker Engine canonical capability 兼容修复候选版本。现场 Inspect 证据
@@ -614,6 +638,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.23]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.23
 [0.2.0-rc.22]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.22
 [0.2.0-rc.21]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.21
 [0.2.0-rc.20]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.20
