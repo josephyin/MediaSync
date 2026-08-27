@@ -102,3 +102,17 @@ uv run --frozen python -m app.providers.baidu.folder_cli \
 
 准确输入确认短语 `CREATE ONE BAIDU TEST FOLDER`。探针通过官方 OpenAPI 只提交一次
 目录创建请求，随后重新列出父目录确认新目录存在；不会自动删除测试目录。
+
+## rc.29 页面配置与订阅验收
+
+四项探针通过后，可在“云盘账号”页面添加百度网盘账号：
+
+1. 主凭证填写 Web Cookie 中的 `BDUSS`，保存后执行“校验账号”；
+2. 选择“绑定 OpenAPI”，填写 OpenList Token 工具生成的 **Refresh Token**，刷新
+   节点必须与取 Token 时使用的全球站或国内站一致；
+3. 保存并校验后，系统会核对 Cookie 与 OpenAPI 返回的百度账号 ID；
+4. 创建来自另一个百度账号的分享订阅，目标目录可以填写尚不存在的路径；
+5. 验证嵌套目录扫描、自动建目录、单项转存、目标查重和任务恢复。
+
+MediaSync 只持久化加密后的 BDUSS 与 Open Refresh Token。OpenList 刷新返回的短期
+Access Token 仅保留在当前进程内；Refresh Token 发生轮换时会加密回写数据库。

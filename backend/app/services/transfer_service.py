@@ -10,7 +10,11 @@ from app.models import Task
 from app.models.base import utcnow
 from app.providers import get_provider
 from app.providers.base import CloudDriveProvider, FolderRef
-from app.services.account_service import get_decrypted_token, persist_provider_token
+from app.services.account_service import (
+    get_decrypted_token,
+    get_runtime_provider,
+    persist_provider_token,
+)
 from app.services.subscription_service import decrypt_share_password
 from app.services.transfer_operation import (
     TransferSpec,
@@ -46,11 +50,16 @@ async def run_transfer(db: Session, task: Task) -> None:
     provider = None
     try:
         account = subscription.cloud_account
-        provider = get_provider(
-            account.provider,
-            get_decrypted_token(account),
-            subscription.target_drive_id,
+        provider = (
+            get_runtime_provider(account, subscription.target_drive_id)
+            if account.provider == "baidu"
+            else get_provider(
+                account.provider,
+                get_decrypted_token(account),
+                subscription.target_drive_id,
+            )
         )
+
         async def record_write_intent() -> None:
             task.provider_write_intent_at = task.provider_write_intent_at or utcnow()
             task.provider_operation_status = "intent"

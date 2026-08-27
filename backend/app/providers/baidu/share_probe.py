@@ -205,6 +205,7 @@ class BaiduShareReadOnlyProbe:
         allowed = {
             (TIEBA_ORIGIN, "/mo/q/sync"),
             (PAN_ORIGIN, "/share/wxlist"),
+            (PAN_ORIGIN, "/share/list"),
         }
         if (origin, path) not in allowed:
             raise BaiduShareUpstreamChangedError("Baidu share probe refused an invalid fixed URL")
@@ -287,6 +288,10 @@ class BaiduShareReadOnlyProbe:
         )
 
     async def probe_account(self) -> AccountProbeResult:
+        await self.fetch_account()
+        return AccountProbeResult(session_accepted=True)
+
+    async def fetch_account(self) -> dict[str, object]:
         payload = await self._request(
             "Cookie account",
             "GET",
@@ -299,7 +304,7 @@ class BaiduShareReadOnlyProbe:
             raise BaiduShareUpstreamChangedError(
                 "Baidu Cookie account returned an unexpected response shape"
             )
-        return AccountProbeResult(session_accepted=True)
+        return data
 
     async def probe_share(
         self,
@@ -336,9 +341,12 @@ class BaiduShareReadOnlyProbe:
         *,
         password: str = "",
         page_size: int = 10,
+        page: int = 1,
     ) -> tuple[str, str, dict[str, object]]:
         if not 1 <= page_size <= MAX_PAGE_SIZE:
             raise ValueError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
+        if not 1 <= page <= 1_000_000:
+            raise ValueError("page must be a positive integer")
         share_id, url_password = parse_share_url(share_url)
         if password and url_password and password != url_password:
             raise ValueError("Share password conflicts with the password in the URL")
@@ -360,10 +368,51 @@ class BaiduShareReadOnlyProbe:
                 "shorturl": share_id,
                 "num": page_size,
                 "order": "time",
-                "page": 1,
+                "page": page,
             },
         )
         return share_id, effective_password, payload
+
+    async def fetch_share_directory(
+        self,
+        *,
+        share_id: int,
+        source_uk: int,
+        sekey: str,
+        directory: str,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> dict[str, object]:
+        if share_id <= 0 or source_uk <= 0:
+            raise ValueError("Baidu share context is invalid")
+        if not directory.startswith("/") or not 1 <= page <= 1_000_000:
+            raise ValueError("Baidu share directory or page is invalid")
+        if not 1 <= page_size <= MAX_PAGE_SIZE:
+            raise ValueError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
+        original_cookie = self._cookie
+        self._cookie = f"{original_cookie}; BDCLND={sekey}"
+        try:
+            return await self._request(
+                "share listing",
+                "GET",
+                PAN_ORIGIN,
+                "/share/list",
+                params={
+                    "shareid": share_id,
+                    "uk": source_uk,
+                    "dir": directory,
+                    "page": page,
+                    "num": page_size,
+                    "order": "name",
+                    "desc": 0,
+                    "showempty": 0,
+                    "web": 1,
+                    "channel": "chunlei",
+                    "clienttype": 0,
+                },
+            )
+        finally:
+            self._cookie = original_cookie
 
     async def run(
         self,

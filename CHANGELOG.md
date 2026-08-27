@@ -2,6 +2,36 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.29] - 2026-08-27
+
+这是百度网盘实验性 Provider 候选版本。分享侧使用加密保存的 BDUSS Cookie，账号盘
+侧使用 OpenList 签发的 Open Refresh Token；短期 Access Token 只保留在进程内。
+
+### 新增
+
+- 新增百度网盘账号验证、分享分页扫描、目标目录浏览和自动创建、目标查重及分享
+  转存能力。
+- 账号页面支持百度 BDUSS 与 OpenList OpenAPI 双凭证绑定，并核对两套凭证所属
+  的百度账号 ID。
+- OpenList 刷新固定使用 `baiduyun_go` 协议，轮换后的 Refresh Token 加密回写，
+  不持久化 Access Token。
+
+### 可靠性与安全边界
+
+- 分享转存不自动重放；请求结果不确定时保留写入意图，已经取得操作标识的任务只
+  查询目标目录，不重复提交远端转存。
+- 目标目录由官方 OpenAPI 创建，分享读取和转存限定到百度官方 HTTPS 主机；Cookie、
+  Access Token 和 Refresh Token 均不会写入任务信息或日志。
+- 百度 Provider 必须同时完成私有 Cookie 和 OpenAPI 凭证校验，缺少 OpenAPI 时不
+  启动转存，避免退回未验证的目录写入接口。
+
+### 验证
+
+- 真实账号 OpenAPI 根目录读取、Web 分享读取、跨账号单项转存和官方 OpenAPI 建
+  目录探针均已通过。
+- 完整后端测试 754 项、前端测试 5 项、Ruff 和前端生产构建通过。
+- 公开 rc.29 双架构镜像、真实嵌套分享扫描和完整订阅转存仍需发布后验收。
+
 ## [0.2.0-rc.28] - 2026-08-27
 
 这是 123 云盘嵌套文件转存修复候选版本。rc.27 已修复目标根目录，但真实订阅在
@@ -745,6 +775,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.29]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.29
 [0.2.0-rc.28]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.28
 [0.2.0-rc.27]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.27
 [0.2.0-rc.26]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.26

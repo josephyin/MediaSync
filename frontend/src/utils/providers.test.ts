@@ -37,6 +37,14 @@ const providers: ProviderInfo[] = [
     status: 'experimental',
     capabilities: ['account_verify', 'share_browse', 'folder_browse', 'folder_create', 'share_save'],
   },
+  {
+    id: 'baidu',
+    name: 'Baidu Netdisk',
+    enabled: true,
+    status: 'experimental',
+    mode: 'hybrid_api',
+    capabilities: ['account_verify', 'share_browse', 'folder_browse', 'folder_create', 'share_save'],
+  },
 ]
 
 describe('provider presentation', () => {
@@ -47,6 +55,7 @@ describe('provider presentation', () => {
     expect(providerMark(providers, 'aliyundrive')).toBe('Ali')
     expect(providerMark(providers, 'quark')).toBe('夸')
     expect(providerMark(providers, 'pan123')).toBe('123')
+    expect(providerMark(providers, 'baidu')).toBe('百')
   })
 
   it('requires both enabled state and every requested capability', () => {

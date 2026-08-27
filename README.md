@@ -16,7 +16,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前候选版本为 `v0.2.0-rc.28`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘、夸克网盘和 123 云盘 Web 私有接口可能随上游更新或账号风控失效。
+> 当前候选版本为 `v0.2.0-rc.29`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘、夸克网盘、123 云盘和百度网盘 Web 私有接口可能随上游更新或账号风控失效。
 
 ## MVP 功能
 
@@ -51,7 +51,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.28
+  josephyjq/mediasync:v0.2.0-rc.29
 ```
 
 访问 `http://NAS_IP:9090`，默认管理员用户名和密码均为 `admin`。首次登录后
@@ -69,7 +69,7 @@ docker run -d \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.28
+  josephyjq/mediasync:v0.2.0-rc.29
 ```
 
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
@@ -97,7 +97,7 @@ SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.28
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.29
 ```
 
 ```bash
@@ -226,7 +226,8 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.25` 失败文件批量重试候选版
 - [x] 发布 `v0.2.0-rc.26` 123 云盘实验性候选版
 - [x] 发布 `v0.2.0-rc.27` 123 云盘根目录修复候选版
-- [ ] 发布 `v0.2.0-rc.28` 123 云盘嵌套文件转存修复候选版
+- [x] 发布 `v0.2.0-rc.28` 123 云盘嵌套文件转存修复候选版
+- [ ] 发布 `v0.2.0-rc.29` 百度网盘实验性 Provider 候选版
 - [ ] 发布 `v0.2.0` 正式版
 - [x] 夸克网盘私有 Q2 只读适配
 - [x] 夸克网盘 OpenList OpenAPI 双凭证适配（待真实凭证验收）
@@ -234,6 +235,7 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 夸克网盘 Provider（实验性；不支持把本账号分享转存回同一账号）
 - [x] 123 云盘私有接口只读、单项转存和建目录真实验收
 - [x] 123 云盘 Provider（Access Token 私有接口，实验性）
+- [x] 百度网盘 Provider（BDUSS + OpenList OpenAPI 双凭证，实验性）
 - [ ] 115 Provider
 - [ ] OneDrive Provider
 - [ ] 多用户和更细粒度权限
@@ -247,7 +249,7 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 写入验收：[夸克网盘单项转存验收](docs/operations/quark-write-probe.md)。
 OpenAPI 验证：[夸克 OpenList OpenAPI 只读验收](docs/operations/quark-openlist-probe.md)。
 123 云盘验收：[只读、单项转存和建目录探针](docs/operations/pan123-readonly-probe.md)。
-百度网盘第一阶段验收：[OpenAPI 账号盘只读探针](docs/operations/baidu-readonly-probe.md)。
+百度网盘验收：[OpenAPI、分享读取、单项转存和建目录探针](docs/operations/baidu-readonly-probe.md)。
 
 ## 参与贡献
 

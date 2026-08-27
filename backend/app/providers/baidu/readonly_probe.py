@@ -194,6 +194,10 @@ class BaiduOpenReadOnlyProbe:
         return payload
 
     async def probe_account(self) -> AccountProbeResult:
+        await self.fetch_account()
+        return AccountProbeResult(session_accepted=True)
+
+    async def fetch_account(self) -> dict[str, object]:
         payload = await self._request(
             "account",
             "/rest/2.0/xpan/nas",
@@ -203,7 +207,7 @@ class BaiduOpenReadOnlyProbe:
             raise BaiduUpstreamChangedError(
                 "Baidu Netdisk account returned an unexpected response shape"
             )
-        return AccountProbeResult(session_accepted=True)
+        return payload
 
     async def probe_root(self, *, page_size: int = 10) -> ListingProbeResult:
         if not 1 <= page_size <= MAX_PAGE_SIZE:
@@ -247,4 +251,3 @@ class BaiduOpenReadOnlyProbe:
         if progress:
             progress("complete")
         return ReadOnlyProbeReport(account=account, root=root)
-

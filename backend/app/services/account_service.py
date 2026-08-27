@@ -8,6 +8,11 @@ from app.core.security import get_credential_cipher
 from app.models import CloudAccount
 from app.providers import get_provider
 from app.providers.aliyundrive.provider import AliyunDriveProvider
+from app.providers.baidu.open_provider import (
+    DEFAULT_OPENLIST_TOKEN_URL as DEFAULT_BAIDU_OPENLIST_TOKEN_URL,
+)
+from app.providers.baidu.open_provider import BaiduOpenProvider
+from app.providers.baidu.provider import BaiduProvider
 from app.providers.base import CloudDriveProvider
 from app.providers.quark.open_provider import (
     DEFAULT_OPENLIST_TOKEN_URL as DEFAULT_QUARK_OPENLIST_TOKEN_URL,
@@ -22,7 +27,7 @@ from app.schemas.cloud_account import (
 DEFAULT_ALISTGO_TOKEN_URL = "https://api.alistgo.com/alist/ali_open/token"
 DEFAULT_OPENLIST_TOKEN_URL = "https://api.oplist.org.cn/alicloud/renewapi"
 HOSTED_OPEN_AUTH_MODES = {"alistgo", "openlist"}
-OPEN_CREDENTIAL_PROVIDERS = {"aliyundrive", "quark"}
+OPEN_CREDENTIAL_PROVIDERS = {"aliyundrive", "quark", "baidu"}
 
 
 def create_account(db: Session, payload: CloudAccountCreate) -> CloudAccount:
@@ -86,10 +91,17 @@ async def verify_account(db: Session, account: CloudAccount) -> CloudAccount:
 
 def persist_provider_token(account: CloudAccount, provider: CloudDriveProvider) -> bool:
     rotated_token = provider.consume_refresh_token_update()
-    if not rotated_token:
-        return False
-    account.refresh_token = get_credential_cipher().encrypt(rotated_token)
-    return True
+    changed = False
+    if rotated_token:
+        account.refresh_token = get_credential_cipher().encrypt(rotated_token)
+        changed = True
+    open_consumer = getattr(provider, "consume_open_refresh_token_update", None)
+    if callable(open_consumer):
+        rotated_open_token = open_consumer()
+        if rotated_open_token:
+            account.open_refresh_token = get_credential_cipher().encrypt(rotated_open_token)
+            changed = True
+    return changed
 
 
 def configure_open_credential(
@@ -97,8 +109,8 @@ def configure_open_credential(
 ) -> CloudAccount:
     if account.provider not in OPEN_CREDENTIAL_PROVIDERS:
         raise ValueError("OpenAPI binding is not available for this provider")
-    if account.provider == "quark" and payload.mode != "openlist":
-        raise ValueError("Quark OpenAPI currently requires OpenList mode")
+    if account.provider in {"quark", "baidu"} and payload.mode != "openlist":
+        raise ValueError(f"{account.provider} OpenAPI currently requires OpenList mode")
     cipher = get_credential_cipher()
     mode_changed = account.open_auth_mode not in (None, payload.mode)
     refresh_token = payload.refresh_token.strip() if payload.refresh_token else None
@@ -110,6 +122,8 @@ def configure_open_credential(
     if payload.mode in HOSTED_OPEN_AUTH_MODES:
         if account.provider == "quark":
             default_url = DEFAULT_QUARK_OPENLIST_TOKEN_URL
+        elif account.provider == "baidu":
+            default_url = DEFAULT_BAIDU_OPENLIST_TOKEN_URL
         else:
             default_url = (
                 DEFAULT_ALISTGO_TOKEN_URL
@@ -198,7 +212,30 @@ def get_open_provider(
             sign_key=client_secret,
             oauth_token_url=account.open_token_url,
         )
+    if account.provider == "baidu":
+        if account.open_auth_mode != "openlist" or not account.open_token_url:
+            raise ValueError("Baidu OpenAPI requires OpenList mode")
+        if drive_id not in (None, "root", "/"):
+            raise ValueError("Baidu OpenAPI currently exposes only its default drive")
+        return BaiduOpenProvider(
+            refresh_token=refresh_token,
+            oauth_token_url=account.open_token_url,
+        )
     raise ValueError("OpenAPI binding is not available for this provider")
+
+
+def get_runtime_provider(
+    account: CloudAccount, drive_id: str | None = None
+) -> CloudDriveProvider:
+    private_token = get_decrypted_token(account)
+    if account.provider != "baidu":
+        return get_provider(account.provider, private_token, drive_id)
+    if account.open_status != "active" or not account.open_auth_mode:
+        raise ValueError("Baidu transfers require a verified OpenAPI credential")
+    open_provider = get_open_provider(account, drive_id)
+    if not isinstance(open_provider, BaiduOpenProvider):
+        raise ValueError("Baidu OpenAPI provider is unavailable")
+    return BaiduProvider(private_token, open_provider)
 
 
 def persist_open_provider_token(account: CloudAccount, provider: CloudDriveProvider) -> bool:
