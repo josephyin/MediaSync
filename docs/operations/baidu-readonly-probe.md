@@ -44,3 +44,22 @@ uv run --frozen python -m app.providers.baidu.cli
 这一结果只证明账号盘的官方 OpenAPI 读取能力。百度公开分享的读取和转存需要独立的
 Web 会话探针，不能由本结果推断为可用。
 
+## 第二阶段：Web 分享只读探针
+
+登录百度网盘 Web 端后，在浏览器开发者工具的 Network 中复制发往
+`pan.baidu.com` 请求的完整 `Cookie` 请求头。Cookie 必须包含非空的 `BDUSS`；不要
+把 Cookie 发到聊天、工单或日志中。
+
+准备一个本人有权访问的非空测试分享。把 Cookie 复制到 macOS 剪贴板，然后执行：
+
+```bash
+uv run --frozen python -m app.providers.baidu.share_cli --cookie-clipboard
+```
+
+根据隐藏提示输入分享 URL 和可选提取码。探针只验证 Cookie 会话并读取分享根目录
+第一页，不创建目录、不转存文件，也不保存 Cookie。成功报告应满足：
+
+- `mode` 为 `readonly_web_share_api`；
+- `checks.account.session_accepted` 为 `true`；
+- `checks.share` 只包含数量和字段名；
+- 报告中不应出现用户名、文件名、路径、Cookie、分享内部令牌或提取码。
