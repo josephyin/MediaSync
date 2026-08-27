@@ -9,10 +9,11 @@ OpenList、SmartStrm、MoviePilot、Emby、Jellyfin 和飞牛影视构建自动�
 
 - ✅ 阿里云盘
 - ✅ 夸克网盘（Cookie 私有接口，实验性）
+- ✅ 123 云盘（Access Token 私有接口，实验性）
 - ⬜ 115
 - ⬜ OneDrive
 
-当前为候选版本，阿里云盘和夸克网盘 Web 私有接口属于实验能力，可能因上游变化
+当前为候选版本，阿里云盘、夸克网盘和 123 云盘 Web 私有接口属于实验能力，可能因上游变化
 或账号风控失效。
 
 ## 一条命令启动
@@ -27,7 +28,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.25
+  josephyjq/mediasync:v0.2.0-rc.26
 ```
 
 打开 `http://NAS_IP:9090`，默认用户名和密码均为 `admin`。首次登录后必须改为

@@ -12,10 +12,11 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 
 - ✅ 阿里云盘（MVP Provider；私有接口实验模式）
 - ✅ 夸克网盘（Cookie 私有接口，实验性）
+- ✅ 123 云盘（Access Token 私有接口，实验性）
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前候选版本为 `v0.2.0-rc.25`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘和夸克网盘 Web 私有接口可能随上游更新或账号风控失效。
+> 当前候选版本为 `v0.2.0-rc.26`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘、夸克网盘和 123 云盘 Web 私有接口可能随上游更新或账号风控失效。
 
 ## MVP 功能
 
@@ -50,7 +51,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.25
+  josephyjq/mediasync:v0.2.0-rc.26
 ```
 
 访问 `http://NAS_IP:9090`，默认管理员用户名和密码均为 `admin`。首次登录后
@@ -68,7 +69,7 @@ docker run -d \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.25
+  josephyjq/mediasync:v0.2.0-rc.26
 ```
 
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
@@ -96,7 +97,7 @@ SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.25
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.26
 ```
 
 ```bash
@@ -152,7 +153,7 @@ docker-compose.yml
 - 不要提交 `.env`、数据库、日志或真实第三方凭证。
 - 修改 `CREDENTIAL_ENCRYPTION_KEY` 会导致已有凭证无法解密。
 - `/data/mediasync.db*` 和 `/data/config/runtime-secrets.json` 是不可分割的备份单元。
-- `private_api` 会模拟 Aliyun Drive Web 客户端调用未公开接口，存在接口变更、限流和账号风控风险；请只操作自己有权访问的账号与分享内容。
+- `private_api` 会模拟对应云盘 Web 客户端调用未公开接口，存在接口变更、限流和账号风控风险；请只操作自己有权访问的账号与分享内容。
 
 ## Provider 开发
 
@@ -223,11 +224,14 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.23` 夸克目录转存诊断修复候选版
 - [x] 发布 `v0.2.0-rc.24` 夸克完整路径建目录修复候选版
 - [x] 发布 `v0.2.0-rc.25` 失败文件批量重试候选版
+- [ ] 发布 `v0.2.0-rc.26` 123 云盘实验性候选版
 - [ ] 发布 `v0.2.0` 正式版
 - [x] 夸克网盘私有 Q2 只读适配
 - [x] 夸克网盘 OpenList OpenAPI 双凭证适配（待真实凭证验收）
 - [x] 夸克网盘私有转存与恢复对账（实验性，跨账号单项真实验收通过）
 - [x] 夸克网盘 Provider（实验性；不支持把本账号分享转存回同一账号）
+- [x] 123 云盘私有接口只读、单项转存和建目录真实验收
+- [x] 123 云盘 Provider（Access Token 私有接口，实验性）
 - [ ] 115 Provider
 - [ ] OneDrive Provider
 - [ ] 多用户和更细粒度权限
@@ -240,6 +244,7 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 本机验证：[夸克网盘只读诊断手册](docs/operations/quark-readonly-probe.md)。
 写入验收：[夸克网盘单项转存验收](docs/operations/quark-write-probe.md)。
 OpenAPI 验证：[夸克 OpenList OpenAPI 只读验收](docs/operations/quark-openlist-probe.md)。
+123 云盘验收：[只读、单项转存和建目录探针](docs/operations/pan123-readonly-probe.md)。
 
 ## 参与贡献
 
