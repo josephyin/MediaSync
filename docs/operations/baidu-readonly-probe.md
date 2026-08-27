@@ -88,3 +88,17 @@ uv run --frozen python -m app.providers.baidu.write_cli \
 `WRITE ONE BAIDU TEST ITEM`。探针只提交一次写请求；网络超时或响应不确定时会保存本机
 意图状态并禁止自动重放。成功后会在目标目录按文件名和大小二次核验，但不会自动删除
 转存结果。
+
+## 第四阶段：官方 OpenAPI 建目录探针
+
+从 OpenList 获取页复制当前 Access Token 到剪贴板。在已存在的测试目录下选择一个不
+存在的子目录路径，例如 `/MediaSync-Write-Probe/AutoFolderProbe`，然后执行：
+
+```bash
+uv run --frozen python -m app.providers.baidu.folder_cli \
+  --token-clipboard \
+  --target-path /MediaSync-Write-Probe/AutoFolderProbe
+```
+
+准确输入确认短语 `CREATE ONE BAIDU TEST FOLDER`。探针通过官方 OpenAPI 只提交一次
+目录创建请求，随后重新列出父目录确认新目录存在；不会自动删除测试目录。
