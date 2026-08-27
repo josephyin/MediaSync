@@ -16,6 +16,7 @@ from app.providers.pan123.readonly_probe import (
     Pan123ReadOnlyProbe,
     Pan123ShareInvalidError,
     Pan123UpstreamChangedError,
+    Pan123WriteRejectedError,
     ReadOnlyProbeReport,
     build_request_signature,
     normalize_access_token,
@@ -326,3 +327,28 @@ async def test_write_response_with_changed_shape_is_uncertain() -> None:
             )
     finally:
         await client.aclose()
+
+
+async def test_file_reuse_business_error_is_write_rejected() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 101304, "message": "private"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    probe = Pan123ReadOnlyProbe("token-value-long-enough", http_client=client)
+    try:
+        with pytest.raises(Pan123WriteRejectedError) as caught:
+            await probe._request(
+                "file reuse",
+                "https://yun.123pan.com",
+                "/b/api/file/upload_request",
+                method="POST",
+                body={},
+                write_may_be_accepted=True,
+            )
+    finally:
+        await client.aclose()
+
+    assert caught.value.code == "PAN123_WRITE_REJECTED"
+    assert str(caught.value) == (
+        "123 Cloud Drive rejected the file-reuse request (http_status=200, code=101304)"
+    )

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import re
 
-from app.providers.pan123.readonly_probe import DRIVE_ORIGIN, Pan123ReadOnlyProbe
+from app.providers.pan123.readonly_probe import (
+    DRIVE_ORIGIN,
+    Pan123ReadOnlyProbe,
+    Pan123WriteRejectedError,
+)
 
 LOGIN_UUID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
@@ -15,7 +19,7 @@ def normalize_login_uuid(value: str) -> str:
 
 
 class Pan123WriteClient(Pan123ReadOnlyProbe):
-    """Minimal non-replaying client for one 123 share-save request."""
+    """Minimal non-replaying client for one 123 Cloud Drive write request."""
 
     async def create_folder(self, *, parent_folder_id: str, name: str) -> None:
         if not parent_folder_id.isdecimal():
@@ -93,3 +97,45 @@ class Pan123WriteClient(Pan123ReadOnlyProbe):
             extra_headers={"LoginUuid": normalize_login_uuid(login_uuid)},
             write_may_be_accepted=True,
         )
+
+    async def reuse_shared_file(
+        self,
+        *,
+        source: dict[str, object],
+        target_folder_id: str,
+        login_uuid: str,
+    ) -> None:
+        file_name = source.get("FileName")
+        size = source.get("Size")
+        etag = source.get("Etag")
+        if not isinstance(file_name, str) or not file_name:
+            raise ValueError("123 share item has no valid FileName")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise ValueError("123 share item has no valid Size")
+        if not isinstance(etag, str) or not etag:
+            raise Pan123WriteRejectedError("123 shared file has no reusable content fingerprint")
+        if not target_folder_id.isdecimal():
+            raise ValueError("123 target folder ID must be numeric")
+        payload = await self._request(
+            "file reuse",
+            DRIVE_ORIGIN,
+            "/b/api/file/upload_request",
+            method="POST",
+            body={
+                "driveId": 0,
+                "etag": etag,
+                "fileName": file_name,
+                "parentFileId": target_folder_id,
+                "size": size,
+                "type": 0,
+                "duplicate": 1,
+                "RequestSource": None,
+            },
+            extra_headers={"LoginUuid": normalize_login_uuid(login_uuid)},
+            write_may_be_accepted=True,
+        )
+        data = payload.get("data")
+        if not isinstance(data, dict) or data.get("Reuse") is not True:
+            raise Pan123WriteRejectedError(
+                "123 Cloud Drive could not reuse the shared file content"
+            )

@@ -1,9 +1,11 @@
 import json
 
 import httpx
+import pytest
 
 from app.providers.base import FolderRef, RemoteItem
 from app.providers.pan123.provider import Pan123PrivateProvider
+from app.providers.pan123.readonly_probe import Pan123WriteRejectedError
 from app.providers.registry import PROVIDERS, list_provider_types
 
 
@@ -137,12 +139,13 @@ async def test_create_folder_is_verified_by_listing() -> None:
     assert folder == FolderRef("99", "/Media")
 
 
-async def test_resumable_save_encodes_recoverable_operation_and_verifies_target() -> None:
+async def test_nested_file_save_reuses_content_and_verifies_target() -> None:
     target_visible = False
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal target_visible
         if request.url.path == "/b/api/share/get":
+            assert request.url.params["parentFileId"] == "55"
             return httpx.Response(
                 200,
                 json={
@@ -151,7 +154,7 @@ async def test_resumable_save_encodes_recoverable_operation_and_verifies_target(
                         "InfoList": [
                             {
                                 "FileId": 10,
-                                "ParentFileId": 0,
+                                "ParentFileId": 55,
                                 "FileName": "probe.txt",
                                 "Size": 5,
                                 "Type": 0,
@@ -162,17 +165,31 @@ async def test_resumable_save_encodes_recoverable_operation_and_verifies_target(
                     },
                 },
             )
-        if request.url.path == "/b/api/restful/goapi/v1/file/copy/save":
+        if request.url.path == "/b/api/file/upload_request":
             assert request.headers["LoginUuid"] == "1234567890abcdef"
+            assert json.loads(request.content) == {
+                "driveId": 0,
+                "etag": "etag",
+                "fileName": "probe.txt",
+                "parentFileId": "99",
+                "size": 5,
+                "type": 0,
+                "duplicate": 1,
+                "RequestSource": None,
+            }
             target_visible = True
-            return httpx.Response(200, json={"code": 0, "data": {}})
+            return httpx.Response(
+                200,
+                json={"code": 0, "data": {"Reuse": True, "Info": {"FileId": 20}}},
+            )
         assert request.url.path == "/b/api/file/list/new"
+        assert request.url.params["parentFileId"] == "99"
         items = []
         if target_visible:
             items = [
                 {
                     "FileId": 20,
-                    "ParentFileId": 0,
+                    "ParentFileId": 99,
                     "FileName": "probe.txt",
                     "Size": 5,
                     "Type": 0,
@@ -189,8 +206,8 @@ async def test_resumable_save_encodes_recoverable_operation_and_verifies_target(
         share = await provider.resolve_share("https://www.123pan.com/s/share-key")
         operation_id = await provider.start_save_shared_item(
             share,
-            RemoteItem("10", "0", "probe.txt", "file", size=5, content_hash="etag"),
-            FolderRef("0", "/"),
+            RemoteItem("10", "55", "probe.txt", "file", size=5, content_hash="etag"),
+            FolderRef("99", "/Media/nested"),
         )
         result = await provider.query_save_operation(operation_id)
     finally:
@@ -199,6 +216,50 @@ async def test_resumable_save_encodes_recoverable_operation_and_verifies_target(
     assert operation_id.startswith("p123v1.")
     assert result.completed is True
     assert result.target_file_ids == ("20",)
+
+
+async def test_file_save_rejects_when_content_cannot_be_reused() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/b/api/share/get":
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "data": {
+                        "InfoList": [
+                            {
+                                "FileId": 10,
+                                "ParentFileId": 55,
+                                "FileName": "probe.txt",
+                                "Size": 5,
+                                "Type": 0,
+                                "Etag": "etag",
+                            }
+                        ],
+                        "Total": 1,
+                    },
+                },
+            )
+        assert request.url.path == "/b/api/file/upload_request"
+        return httpx.Response(
+            200,
+            json={"code": 0, "data": {"Reuse": False, "Info": {}}},
+        )
+
+    provider, client = make_provider(handler)
+    try:
+        share = await provider.resolve_share("https://www.123pan.com/s/share-key")
+        with pytest.raises(
+            Pan123WriteRejectedError,
+            match="could not reuse the shared file content",
+        ):
+            await provider.start_save_shared_item(
+                share,
+                RemoteItem("10", "55", "probe.txt", "file", size=5, content_hash="etag"),
+                FolderRef("99", "/Media/nested"),
+            )
+    finally:
+        await client.aclose()
 
 
 def test_pan123_provider_is_exposed_as_experimental() -> None:

@@ -330,9 +330,10 @@ class Pan123ReadOnlyProbe:
             raise Pan123ShareInvalidError(
                 "123 Cloud Drive share is invalid, protected, or unavailable"
             )
-        if stage == "share save":
+        if stage in {"share save", "file reuse"}:
+            operation = "share-save" if stage == "share save" else "file-reuse"
             raise Pan123WriteRejectedError(
-                "123 Cloud Drive rejected the share-save request "
+                f"123 Cloud Drive rejected the {operation} request "
                 f"(http_status={http_status}, code={code})"
             )
         if any(marker in message for marker in ("login", "token", "未登录", "登录")):
