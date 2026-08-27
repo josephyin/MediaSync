@@ -18,6 +18,7 @@ export function providerMark(providers: ProviderInfo[], providerId: string): str
   const name = providerName(providers, providerId)
   if (providerId === 'aliyundrive') return 'Ali'
   if (providerId === 'quark') return '夸'
+  if (providerId === 'pan123') return '123'
   return name.slice(0, 3)
 }
 

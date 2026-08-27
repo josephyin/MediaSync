@@ -64,7 +64,9 @@ function defaultOpenTokenUrl(account: CloudAccount, mode: 'alistgo' | 'openlist'
 }
 const accountCredentialLabel = computed(() => {
   const suffix = editingId.value ? '（留空表示不修改）' : ''
-  return form.provider === 'quark' ? `Cookie${suffix}` : `Refresh Token${suffix}`
+  if (form.provider === 'quark') return `Cookie${suffix}`
+  if (form.provider === 'pan123') return `Access Token${suffix}`
+  return `Refresh Token${suffix}`
 })
 function canVerify(account: CloudAccount) {
   return supportsCapabilities(providerInfo(account.provider), ['account_verify'])
@@ -341,7 +343,10 @@ onUnmounted(stopQrPolling)
           </el-select>
         </el-form-item>
         <el-form-item label="账号名称"><el-input v-model="form.name" placeholder="例如：家庭影音盘" /></el-form-item>
-        <el-form-item :label="accountCredentialLabel"><el-input v-model="form.refresh_token" type="password" show-password /></el-form-item>
+        <el-form-item :label="accountCredentialLabel">
+          <el-input v-model="form.refresh_token" type="password" show-password />
+          <div v-if="form.provider === 'pan123'" class="form-tip">填写 123 云盘 Web 端 Local Storage 中的 authorToken；凭证会加密保存，请勿发送到聊天或日志。</div>
+        </el-form-item>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="loading" @click="save">保存</el-button></template>
     </el-dialog>

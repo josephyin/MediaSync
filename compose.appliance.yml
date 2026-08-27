@@ -1,6 +1,6 @@
 services:
   mediasync:
-    image: ${MEDIASYNC_IMAGE:-josephyjq/mediasync:v0.2.0-rc.25}
+    image: ${MEDIASYNC_IMAGE:-josephyjq/mediasync:v0.2.0-rc.26}
     container_name: mediasync
     restart: unless-stopped
     stop_grace_period: 120s

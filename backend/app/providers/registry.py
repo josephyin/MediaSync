@@ -5,6 +5,7 @@ from app.core.exceptions import ProviderError
 from app.providers.aliyundrive.private_provider import AliyunDrivePrivateProvider
 from app.providers.aliyundrive.provider import AliyunDriveProvider
 from app.providers.base import CloudDriveProvider
+from app.providers.pan123.provider import Pan123PrivateProvider
 from app.providers.quark.provider import QuarkPrivateProvider
 
 ProviderFactory = Callable[[str, str | None], CloudDriveProvider]
@@ -36,9 +37,16 @@ def _quark_factory(cookie: str, drive_id: str | None = None) -> CloudDriveProvid
     return QuarkPrivateProvider(cookie=cookie)
 
 
+def _pan123_factory(access_token: str, drive_id: str | None = None) -> CloudDriveProvider:
+    if drive_id not in (None, "0"):
+        raise ProviderError("123 Cloud Drive currently exposes only its default drive")
+    return Pan123PrivateProvider(access_token=access_token)
+
+
 PROVIDERS: dict[str, ProviderFactory] = {
     "aliyundrive": _aliyundrive_factory,
     "quark": _quark_factory,
+    "pan123": _pan123_factory,
 }
 
 
@@ -76,6 +84,20 @@ def list_provider_types() -> list[dict[str, object]]:
         {
             "id": "quark",
             "name": "Quark Drive",
+            "enabled": True,
+            "status": "experimental",
+            "mode": "private_api",
+            "capabilities": [
+                "account_verify",
+                "share_browse",
+                "folder_browse",
+                "folder_create",
+                "share_save",
+            ],
+        },
+        {
+            "id": "pan123",
+            "name": "123 Cloud Drive",
             "enabled": True,
             "status": "experimental",
             "mode": "private_api",

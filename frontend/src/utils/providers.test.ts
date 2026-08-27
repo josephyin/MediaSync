@@ -30,6 +30,13 @@ const providers: ProviderInfo[] = [
     enabled: false,
     capabilities: [],
   },
+  {
+    id: 'pan123',
+    name: '123 Cloud Drive',
+    enabled: true,
+    status: 'experimental',
+    capabilities: ['account_verify', 'share_browse', 'folder_browse', 'folder_create', 'share_save'],
+  },
 ]
 
 describe('provider presentation', () => {
@@ -39,6 +46,7 @@ describe('provider presentation', () => {
     expect(providerName(providers, 'unknown')).toBe('unknown')
     expect(providerMark(providers, 'aliyundrive')).toBe('Ali')
     expect(providerMark(providers, 'quark')).toBe('夸')
+    expect(providerMark(providers, 'pan123')).toBe('123')
   })
 
   it('requires both enabled state and every requested capability', () => {
