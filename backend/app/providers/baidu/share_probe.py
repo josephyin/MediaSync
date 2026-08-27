@@ -16,7 +16,6 @@ TIEBA_ORIGIN = "https://tieba.baidu.com"
 DEFAULT_TIMEOUT_SECONDS = 15.0
 MAX_COOKIE_LENGTH = 32_768
 MAX_PAGE_SIZE = 100
-COOKIE_NAME_PATTERN = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 SHARE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{4,128}$")
 
 
@@ -82,28 +81,25 @@ def normalize_cookie(raw_cookie: str) -> str:
             raise ValueError("Cookie contains an invalid item")
         return f"BDUSS={value}"
 
-    parsed: dict[str, str] = {}
+    bduss_values: list[str] = []
     for part in value.split(";"):
-        item = part.strip()
-        if not item:
+        item = part.strip().strip("'\"")
+        marker = item.find("BDUSS=")
+        if marker < 0:
             continue
-        if "=" not in item:
-            raise ValueError("Cookie contains an invalid item")
-        name, cookie_value = item.split("=", 1)
-        name = name.strip()
-        cookie_value = cookie_value.strip()
-        if not COOKIE_NAME_PATTERN.fullmatch(name):
-            raise ValueError("Cookie contains an invalid name")
-        if name in parsed:
-            raise ValueError("Cookie contains a duplicate name")
-        if any(ord(character) < 32 or ord(character) == 127 for character in cookie_value):
-            raise ValueError("Cookie contains an invalid value")
-        parsed[name] = cookie_value
-    if not parsed:
-        raise ValueError("Cookie contains no key-value items")
-    if not parsed.get("BDUSS"):
+        cookie_value = item[marker + len("BDUSS=") :].strip().strip("'\"")
+        if not cookie_value:
+            raise ValueError("Cookie contains an empty BDUSS value")
+        if any(character.isspace() for character in cookie_value):
+            cookie_value = cookie_value.split(maxsplit=1)[0]
+        if not cookie_value:
+            raise ValueError("Cookie contains an invalid BDUSS value")
+        bduss_values.append(cookie_value)
+    if not bduss_values:
         raise ValueError("Cookie must contain a non-empty BDUSS value")
-    return "; ".join(f"{name}={cookie_value}" for name, cookie_value in parsed.items())
+    if len(set(bduss_values)) != 1:
+        raise ValueError("Cookie contains conflicting BDUSS values")
+    return f"BDUSS={bduss_values[0]}"
 
 
 def parse_share_url(share_url: str) -> tuple[str, str | None]:

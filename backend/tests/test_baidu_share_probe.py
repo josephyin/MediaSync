@@ -77,7 +77,6 @@ def test_cli_can_read_cookie_from_local_clipboard(monkeypatch: pytest.MonkeyPatc
         "",
         "missing-equals",
         "STOKEN=value",
-        "BDUSS=one; BDUSS=two",
         "BDUSS=value\nInjected: true",
     ],
 )
@@ -87,9 +86,7 @@ def test_cookie_validation_rejects_unsafe_input(cookie: str) -> None:
 
 
 def test_cookie_validation_preserves_values_and_requires_bduss() -> None:
-    assert normalize_cookie(" BDUSS=abc== ; STOKEN=rotating ") == (
-        "BDUSS=abc==; STOKEN=rotating"
-    )
+    assert normalize_cookie(" BDUSS=abc== ; STOKEN=rotating ") == "BDUSS=abc=="
 
 
 def test_cookie_validation_accepts_a_bare_bduss_value() -> None:
@@ -104,8 +101,19 @@ def test_cookie_validation_accepts_bare_bduss_with_equals_padding() -> None:
 
 def test_cookie_validation_accepts_cookie_header_prefix() -> None:
     assert normalize_cookie("Cookie: BDUSS=session-value; STOKEN=other") == (
-        "BDUSS=session-value; STOKEN=other"
+        "BDUSS=session-value"
     )
+
+
+def test_cookie_validation_extracts_bduss_and_ignores_non_cookie_text() -> None:
+    assert normalize_cookie(
+        "Request Cookie: odd item; invalid name=value; BDUSS=session-value; Secure"
+    ) == "BDUSS=session-value"
+
+
+def test_cookie_validation_rejects_conflicting_bduss_values() -> None:
+    with pytest.raises(ValueError, match="conflicting"):
+        normalize_cookie("BDUSS=one; BDUSS=two")
 
 
 @pytest.mark.parametrize(
@@ -137,7 +145,7 @@ async def test_probe_uses_fixed_hosts_and_returns_only_structural_data() -> None
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         assert request.url.host in {"tieba.baidu.com", "pan.baidu.com"}
-        assert request.headers["Cookie"] == "BDUSS=session-value; STOKEN=other-value"
+        assert request.headers["Cookie"] == "BDUSS=session-value"
         assert request.headers["User-Agent"] == "netdisk"
         if request.url.path == "/mo/q/sync":
             return httpx.Response(
