@@ -4,6 +4,7 @@ from app.core.config import get_settings
 from app.core.exceptions import ProviderError
 from app.providers.aliyundrive.private_provider import AliyunDrivePrivateProvider
 from app.providers.aliyundrive.provider import AliyunDriveProvider
+from app.providers.baidu.provider import BaiduPrivateProvider
 from app.providers.base import CloudDriveProvider
 from app.providers.pan123.provider import Pan123PrivateProvider
 from app.providers.quark.provider import QuarkPrivateProvider
@@ -43,10 +44,17 @@ def _pan123_factory(access_token: str, drive_id: str | None = None) -> CloudDriv
     return Pan123PrivateProvider(access_token=access_token)
 
 
+def _baidu_factory(cookie: str, drive_id: str | None = None) -> CloudDriveProvider:
+    if drive_id not in (None, "root", "/"):
+        raise ProviderError("Baidu Netdisk currently exposes only its default drive")
+    return BaiduPrivateProvider(cookie=cookie)
+
+
 PROVIDERS: dict[str, ProviderFactory] = {
     "aliyundrive": _aliyundrive_factory,
     "quark": _quark_factory,
     "pan123": _pan123_factory,
+    "baidu": _baidu_factory,
 }
 
 
@@ -101,6 +109,20 @@ def list_provider_types() -> list[dict[str, object]]:
             "enabled": True,
             "status": "experimental",
             "mode": "private_api",
+            "capabilities": [
+                "account_verify",
+                "share_browse",
+                "folder_browse",
+                "folder_create",
+                "share_save",
+            ],
+        },
+        {
+            "id": "baidu",
+            "name": "Baidu Netdisk",
+            "enabled": True,
+            "status": "experimental",
+            "mode": "hybrid_api",
             "capabilities": [
                 "account_verify",
                 "share_browse",

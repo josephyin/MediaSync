@@ -12,6 +12,8 @@ from app.services.account_service import (
     DEFAULT_QUARK_OPENLIST_TOKEN_URL,
     configure_open_credential,
     get_open_provider,
+    get_runtime_provider,
+    persist_provider_token,
     verify_open_credential,
 )
 
@@ -123,6 +125,56 @@ def test_quark_openlist_rejects_missing_app_credentials() -> None:
                 account,
                 OpenCredentialConfigure(mode="openlist", refresh_token="token"),
             )
+
+
+def test_configure_baidu_openlist_credential_requires_no_app_keys() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "baidu")
+        configure_open_credential(
+            db,
+            account,
+            OpenCredentialConfigure(
+                mode="openlist",
+                refresh_token="baidu-refresh-token",
+                token_url="https://api.oplist.org/baiduyun/renewapi",
+            ),
+        )
+
+        provider = get_open_provider(account)
+
+        assert account.open_auth_mode == "openlist"
+        assert account.open_client_id is None
+        assert account.open_client_secret is None
+        assert provider.refresh_token == "baidu-refresh-token"
+
+
+def test_baidu_runtime_provider_combines_credentials_and_persists_open_rotation() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "baidu")
+        account.refresh_token = get_credential_cipher().encrypt("BDUSS=session-value")
+        configure_open_credential(
+            db,
+            account,
+            OpenCredentialConfigure(
+                mode="openlist",
+                refresh_token="baidu-refresh-token",
+            ),
+        )
+        account.open_status = "active"
+        db.commit()
+
+        provider = get_runtime_provider(account)
+        provider._open._refresh_token_update = "baidu-rotated-token"
+
+        assert persist_provider_token(account, provider) is True
+        assert (
+            get_credential_cipher().decrypt(account.open_refresh_token)
+            == "baidu-rotated-token"
+        )
 
 
 @pytest.mark.parametrize("mode", ["alistgo", "custom"])

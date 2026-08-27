@@ -19,7 +19,11 @@ from app.models import CloudAccount, CloudFile, Task
 from app.models.base import utcnow
 from app.providers import get_provider
 from app.providers.base import CloudDriveProvider
-from app.services.account_service import get_decrypted_token, persist_provider_token
+from app.services.account_service import (
+    get_decrypted_token,
+    get_runtime_provider,
+    persist_provider_token,
+)
 from app.services.subscription_service import decrypt_share_password
 from app.services.transfer_operation import (
     TransferCancelledError,
@@ -90,6 +94,7 @@ class _TransferSource:
     refresh_token: str
     target_drive_id: str | None
     spec: TransferSpec
+    runtime_provider: CloudDriveProvider | None = None
 
 
 @dataclass(frozen=True)
@@ -155,7 +160,7 @@ class TransferTaskHandler:
         operation_result: TransferOperationResult | None = None
         operation_error: Exception | None = None
         try:
-            provider = self._provider_factory(
+            provider = source.runtime_provider or self._provider_factory(
                 source.provider_type,
                 source.refresh_token,
                 source.target_drive_id,
@@ -268,6 +273,11 @@ class TransferTaskHandler:
                 provider_type=account.provider,
                 refresh_token=self._token_loader(account),
                 target_drive_id=subscription.target_drive_id,
+                runtime_provider=(
+                    get_runtime_provider(account, subscription.target_drive_id)
+                    if self._provider_factory is get_provider
+                    else None
+                ),
                 spec=TransferSpec(
                     share_url=subscription.share_url,
                     share_password=decrypt_share_password(subscription),
