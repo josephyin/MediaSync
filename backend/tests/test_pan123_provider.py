@@ -96,6 +96,7 @@ async def test_create_folder_is_verified_by_listing() -> None:
         nonlocal list_calls
         if request.url.path == "/b/api/file/list/new":
             list_calls += 1
+            assert request.url.params["parentFileId"] == "0"
             items = []
             if list_calls >= 2:
                 items = [
@@ -129,7 +130,7 @@ async def test_create_folder_is_verified_by_listing() -> None:
 
     provider, client = make_provider(handler)
     try:
-        folder = await provider.ensure_folder(FolderRef("0", "/"), "Media")
+        folder = await provider.ensure_folder(FolderRef("root", "/"), "Media")
     finally:
         await client.aclose()
 

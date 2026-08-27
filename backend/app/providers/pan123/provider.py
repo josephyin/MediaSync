@@ -202,6 +202,13 @@ class Pan123PrivateProvider:
             await self._finish_probe(probe)
         return self._remote_page(payload, page=page, page_size=self._page_size)
 
+    @staticmethod
+    def _target_folder_id(folder_id: str) -> str:
+        normalized = ROOT_FOLDER_ID if folder_id == "root" else folder_id
+        if not normalized.isdecimal():
+            raise ValueError("123 target folder ID must be numeric")
+        return normalized
+
     async def resolve_target_path(self, path: str) -> FolderRef:
         normalized = "/" + path.strip("/") if path.strip("/") else "/"
         current = FolderRef(ROOT_FOLDER_ID, "/")
@@ -217,7 +224,9 @@ class Pan123PrivateProvider:
     async def list_target_items(
         self, target: FolderRef, marker: str | None = None
     ) -> RemotePage:
-        return await self._list_drive_items(target.folder_id, marker)
+        return await self._list_drive_items(
+            self._target_folder_id(target.folder_id), marker
+        )
 
     async def find_target_item(self, target: FolderRef, name: str) -> RemoteItem | None:
         marker: str | None = None
@@ -238,7 +247,9 @@ class Pan123PrivateProvider:
         client = self._new_probe(write=True)
         assert isinstance(client, Pan123WriteClient)
         try:
-            await client.create_folder(parent_folder_id=parent.folder_id, name=name)
+            await client.create_folder(
+                parent_folder_id=self._target_folder_id(parent.folder_id), name=name
+            )
         finally:
             await self._finish_probe(client)
         for _attempt in range(5):
