@@ -50,6 +50,9 @@ Web 会话探针，不能由本结果推断为可用。
 `pan.baidu.com` 请求的完整 `Cookie` 请求头。Cookie 必须包含非空的 `BDUSS`；不要
 把 Cookie 发到聊天、工单或日志中。
 
+也可以在浏览器的 Cookie 表格中只复制 `BDUSS` 对应的 Value；探针会在内存中将该
+单独值识别为 `BDUSS`，无需手工拼接 `BDUSS=`。
+
 准备一个本人有权访问的非空测试分享。把 Cookie 复制到 macOS 剪贴板，然后执行：
 
 ```bash

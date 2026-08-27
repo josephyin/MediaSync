@@ -73,6 +73,13 @@ def normalize_cookie(raw_cookie: str) -> str:
     if any(ord(character) < 32 or ord(character) == 127 for character in value):
         raise ValueError("Cookie contains control characters")
 
+    # Browser cookie tables commonly copy only the selected BDUSS value. Accept
+    # that unambiguous form so users do not have to reconstruct a credential.
+    if "=" not in value and ";" not in value:
+        if len(value) < 20 or any(character.isspace() for character in value):
+            raise ValueError("Cookie contains an invalid item")
+        return f"BDUSS={value}"
+
     parsed: dict[str, str] = {}
     for part in value.split(";"):
         item = part.strip()

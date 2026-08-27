@@ -92,6 +92,11 @@ def test_cookie_validation_preserves_values_and_requires_bduss() -> None:
     )
 
 
+def test_cookie_validation_accepts_a_bare_bduss_value() -> None:
+    value = "a-valid-bduss-value-copied-from-browser"
+    assert normalize_cookie(value) == f"BDUSS={value}"
+
+
 @pytest.mark.parametrize(
     "share_url",
     [
@@ -233,4 +238,3 @@ async def test_probe_classifies_share_business_error() -> None:
             await probe.probe_share("https://pan.baidu.com/s/1share_key")
     finally:
         await client.aclose()
-
