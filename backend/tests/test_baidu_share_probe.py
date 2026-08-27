@@ -97,6 +97,17 @@ def test_cookie_validation_accepts_a_bare_bduss_value() -> None:
     assert normalize_cookie(value) == f"BDUSS={value}"
 
 
+def test_cookie_validation_accepts_bare_bduss_with_equals_padding() -> None:
+    value = "a-valid-bduss-value-copied-from-browser=="
+    assert normalize_cookie(value) == f"BDUSS={value}"
+
+
+def test_cookie_validation_accepts_cookie_header_prefix() -> None:
+    assert normalize_cookie("Cookie: BDUSS=session-value; STOKEN=other") == (
+        "BDUSS=session-value; STOKEN=other"
+    )
+
+
 @pytest.mark.parametrize(
     "share_url",
     [

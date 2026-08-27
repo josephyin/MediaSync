@@ -68,6 +68,8 @@ def normalize_cookie(raw_cookie: str) -> str:
     value = raw_cookie.strip()
     if not value:
         raise ValueError("Cookie is required")
+    if value.lower().startswith("cookie:"):
+        value = value[7:].strip()
     if len(value) > MAX_COOKIE_LENGTH:
         raise ValueError("Cookie is too long")
     if any(ord(character) < 32 or ord(character) == 127 for character in value):
@@ -75,7 +77,7 @@ def normalize_cookie(raw_cookie: str) -> str:
 
     # Browser cookie tables commonly copy only the selected BDUSS value. Accept
     # that unambiguous form so users do not have to reconstruct a credential.
-    if "=" not in value and ";" not in value:
+    if ";" not in value and not value.startswith("BDUSS="):
         if len(value) < 20 or any(character.isspace() for character in value):
             raise ValueError("Cookie contains an invalid item")
         return f"BDUSS={value}"
