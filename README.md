@@ -247,6 +247,7 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 写入验收：[夸克网盘单项转存验收](docs/operations/quark-write-probe.md)。
 OpenAPI 验证：[夸克 OpenList OpenAPI 只读验收](docs/operations/quark-openlist-probe.md)。
 123 云盘验收：[只读、单项转存和建目录探针](docs/operations/pan123-readonly-probe.md)。
+百度网盘第一阶段验收：[OpenAPI 账号盘只读探针](docs/operations/baidu-readonly-probe.md)。
 
 ## 参与贡献
 
