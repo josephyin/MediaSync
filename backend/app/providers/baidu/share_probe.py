@@ -308,6 +308,35 @@ class BaiduShareReadOnlyProbe:
         password: str = "",
         page_size: int = 10,
     ) -> ShareProbeResult:
+        _share_id, _password, payload = await self.fetch_share_page(
+            share_url,
+            password=password,
+            page_size=page_size,
+        )
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise BaiduShareUpstreamChangedError(
+                "Baidu share listing returned an unexpected response shape"
+            )
+        raw_items = data.get("list")
+        if not isinstance(raw_items, list) or any(not isinstance(item, dict) for item in raw_items):
+            raise BaiduShareUpstreamChangedError(
+                "Baidu share listing returned invalid items"
+            )
+        items: list[dict[str, object]] = raw_items
+        return ShareProbeResult(
+            item_count=len(items),
+            total_count=None,
+            field_names=_field_names(items),
+        )
+
+    async def fetch_share_page(
+        self,
+        share_url: str,
+        *,
+        password: str = "",
+        page_size: int = 10,
+    ) -> tuple[str, str, dict[str, object]]:
         if not 1 <= page_size <= MAX_PAGE_SIZE:
             raise ValueError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
         share_id, url_password = parse_share_url(share_url)
@@ -334,22 +363,7 @@ class BaiduShareReadOnlyProbe:
                 "page": 1,
             },
         )
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            raise BaiduShareUpstreamChangedError(
-                "Baidu share listing returned an unexpected response shape"
-            )
-        raw_items = data.get("list")
-        if not isinstance(raw_items, list) or any(not isinstance(item, dict) for item in raw_items):
-            raise BaiduShareUpstreamChangedError(
-                "Baidu share listing returned invalid items"
-            )
-        items: list[dict[str, object]] = raw_items
-        return ShareProbeResult(
-            item_count=len(items),
-            total_count=None,
-            field_names=_field_names(items),
-        )
+        return share_id, effective_password, payload
 
     async def run(
         self,

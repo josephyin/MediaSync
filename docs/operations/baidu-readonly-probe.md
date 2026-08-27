@@ -69,3 +69,22 @@ uv run --frozen python -m app.providers.baidu.share_cli --cookie-clipboard
 - `checks.account.session_accepted` 为 `true`；
 - `checks.share` 只包含数量和字段名；
 - 报告中不应出现用户名、文件名、路径、Cookie、分享内部令牌或提取码。
+
+## 第三阶段：单项转存写入探针
+
+先在百度网盘中手工创建一个空目录，例如 `/MediaSync-Write-Probe`。准备一个本人有权
+访问、且根层恰好只有一个测试项的分享；建议使用另一个账号创建，目标目录中不得已
+存在同名项。
+
+Cookie 或 BDUSS Value 放在剪贴板后执行：
+
+```bash
+uv run --frozen python -m app.providers.baidu.write_cli \
+  --cookie-clipboard \
+  --target-path /MediaSync-Write-Probe
+```
+
+按提示输入分享 URL、可选提取码，并准确输入确认短语
+`WRITE ONE BAIDU TEST ITEM`。探针只提交一次写请求；网络超时或响应不确定时会保存本机
+意图状态并禁止自动重放。成功后会在目标目录按文件名和大小二次核验，但不会自动删除
+转存结果。
