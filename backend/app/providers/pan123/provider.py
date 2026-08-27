@@ -324,13 +324,20 @@ class Pan123PrivateProvider:
         client = self._new_probe(write=True)
         assert isinstance(client, Pan123WriteClient)
         try:
-            await client.save_share_item(
-                share_key=share.share_key,
-                share_password=self._share_passwords[share.share_key],
-                source=raw,
-                target_folder_id=target.folder_id,
-                login_uuid=self._login_uuid,
-            )
+            if resolved.item_type == "file":
+                await client.reuse_shared_file(
+                    source=raw,
+                    target_folder_id=self._target_folder_id(target.folder_id),
+                    login_uuid=self._login_uuid,
+                )
+            else:
+                await client.save_share_item(
+                    share_key=share.share_key,
+                    share_password=self._share_passwords[share.share_key],
+                    source=raw,
+                    target_folder_id=self._target_folder_id(target.folder_id),
+                    login_uuid=self._login_uuid,
+                )
         finally:
             await self._finish_probe(client)
         return self._operation_id(
