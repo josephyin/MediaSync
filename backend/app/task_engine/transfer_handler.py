@@ -458,7 +458,7 @@ class TransferTaskHandler:
                 )
             safe_message = (
                 str(exc)
-                if exc.code.startswith("QUARK_")
+                if exc.code.startswith(("QUARK_", "PAN123_"))
                 else "cloud-drive request failed and can be retried"
             )
             return _FailureDisposition(

@@ -18,6 +18,7 @@ from app.providers.base import (
     SaveResult,
     ShareInfo,
 )
+from app.providers.pan123.readonly_probe import Pan123ProbeError
 from app.providers.quark.readonly_probe import QuarkProbeError
 from app.task_engine.handlers import (
     TaskExecutionContext,
@@ -579,6 +580,28 @@ async def test_quark_failure_keeps_sanitized_provider_detail(
 
     assert outcome.status == "retry"
     assert outcome.error_code == "QUARK_PROBE_FAILED"
+    assert outcome.error_message == detail
+    assert file.last_error == detail
+
+
+async def test_pan123_failure_keeps_sanitized_provider_detail(
+    sessions: sessionmaker[Session],
+) -> None:
+    task_id, subscription_id, file_id = seed_transfer(sessions)
+    detail = "123 Cloud Drive rejected the root request (http_status=400, code=23001)"
+    provider = FakeTransferProvider(resolve_error=Pan123ProbeError(detail))
+
+    outcome = await handler(sessions, provider)(
+        context(
+            task_id=task_id,
+            subscription_id=subscription_id,
+            file_id=file_id,
+        )
+    )
+    _task, file, _run_count = load_state(sessions, task_id, file_id)
+
+    assert outcome.status == "retry"
+    assert outcome.error_code == "PAN123_PROBE_FAILED"
     assert outcome.error_message == detail
     assert file.last_error == detail
 

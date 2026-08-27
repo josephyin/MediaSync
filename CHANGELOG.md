@@ -2,6 +2,25 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.27] - 2026-08-27
+
+这是 123 云盘真实订阅根目录修复候选版本。rc.26 的三个独立探针均使用上游原生
+根目录 ID `0`，但任务引擎从通用根目录标识 `root` 开始准备目标路径，导致真实
+订阅在首次目标目录查询时被 123 云盘拒绝。
+
+### 修复
+
+- 123 Provider 在目标目录浏览和创建入口把任务引擎的通用 `root` 严格规范化为
+  上游要求的数字根目录 ID `0`。
+- `PAN123_*` 请求失败保留脱敏后的执行阶段、HTTP 状态和业务码，不再只显示通用
+  的可重试错误。
+
+### 验证
+
+- 新增通用 `root` 进入真实 123 目录查询与创建契约的回归测试。
+- 新增 123 任务错误详情透传测试，确保不改变其他 Provider 的凭证脱敏边界。
+- 完整后端测试 700 项、前端测试 5 项、Ruff 与前端生产构建通过。
+
 ## [0.2.0-rc.26] - 2026-08-27
 
 这是 123 云盘实验性 Provider 候选版本。实现基于 Web Access Token 的私有接口，
@@ -704,6 +723,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.27]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.27
 [0.2.0-rc.26]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.26
 [0.2.0-rc.25]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.25
 [0.2.0-rc.24]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.24
