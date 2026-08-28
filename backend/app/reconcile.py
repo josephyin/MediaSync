@@ -11,6 +11,7 @@ from app.core.execution import (
     BackgroundExecutionModeError,
     require_background_execution_mode,
 )
+from app.core.logging import suppress_sensitive_http_client_logs
 from app.models.base import utcnow
 from app.services.legacy_task_reconciliation import (
     LegacyTaskReconciliationResult,
@@ -77,6 +78,7 @@ def main() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    suppress_sensitive_http_client_logs()
     try:
         run_reconciliation(settings=settings)
     except BackgroundExecutionModeError as exc:

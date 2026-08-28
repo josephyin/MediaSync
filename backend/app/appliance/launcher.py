@@ -20,6 +20,7 @@ from app.appliance.health import (
     ApplianceHealthServer,
 )
 from app.core.config import get_settings
+from app.core.logging import suppress_sensitive_http_client_logs
 from app.core.runtime_secrets import (
     RUNTIME_CONFIG_DIRECTORY,
     RUNTIME_SECRETS_FILENAME,
@@ -522,6 +523,7 @@ def main() -> None:
         ),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    suppress_sensitive_http_client_logs()
     raise SystemExit(ApplianceLauncher().run())
 
 

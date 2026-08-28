@@ -2,6 +2,36 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.30] - 2026-08-28
+
+这是账号授权体验收口候选版本。新增 123 云盘和百度网盘本地扫码登录，并把不同
+Provider 所需的私有登录与 OpenAPI 授权在账号页面中明确分步展示。
+
+### 新增
+
+- 账号页面改为先选云盘、再按必需顺序完成授权；明确区分私有登录、必需 OpenAPI
+  和可选 OpenAPI，手工 Cookie/Token 保留为高级备用入口。
+- 新增 123 云盘二维码登录，扫码确认后自动换取 Access Token 并加密保存。
+- 新增百度网盘二维码登录，扫码确认后自动换取 BDUSS；私有登录成功后继续引导
+  绑定 OpenList OpenAPI Refresh Token。
+- 百度 OpenList 页面提供授权站点、节点匹配和剪贴板导入引导。
+
+### 修复与安全
+
+- 修复百度同账号误判：私有凭证改用百度网盘 `uk`，不再拿贴吧 `user_id` 与
+  OpenAPI `uk` 比较。
+- 修复 OpenList 校验后再次点击会用输入框中的旧 Refresh Token 覆盖轮换结果的问题。
+- 降低 `httpx`/`httpcore` 请求日志级别，避免带 Refresh Token 或 Access Token 的
+  查询字符串进入 API、Scheduler、Worker、Updater、Reconcile 和 Appliance 日志。
+- 二维码会话和短期凭证只保存在当前进程内；API 响应不返回 BDUSS 或 Access Token。
+
+### 验证
+
+- 123 云盘和百度网盘真实扫码登录通过；百度私有凭证与 OpenList OpenAPI 同账号
+  校验通过。
+- 完整后端测试 765 项、前端测试 5 项、Ruff 和前端生产构建通过。
+- 公开 rc.30 双架构镜像和 NAS 一键升级仍需发布工作流及现场验证。
+
 ## [0.2.0-rc.29] - 2026-08-27
 
 这是百度网盘实验性 Provider 候选版本。分享侧使用加密保存的 BDUSS Cookie，账号盘
@@ -775,6 +805,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.30]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.30
 [0.2.0-rc.29]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.29
 [0.2.0-rc.28]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.28
 [0.2.0-rc.27]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.27

@@ -144,13 +144,25 @@ async def test_probe_uses_fixed_hosts_and_returns_only_structural_data() -> None
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        assert request.url.host in {"tieba.baidu.com", "pan.baidu.com"}
+        assert request.url.host == "pan.baidu.com"
         assert request.headers["Cookie"] == "BDUSS=session-value"
         assert request.headers["User-Agent"] == "netdisk"
-        if request.url.path == "/mo/q/sync":
+        if request.url.path == "/api/gettemplatevariable":
+            assert dict(request.url.params) == {
+                "channel": "chunlei",
+                "web": "1",
+                "app_id": "250528",
+                "clienttype": "0",
+            }
+            assert dict(httpx.QueryParams(request.content.decode())) == {
+                "fields": '["uk","username","loginstate"]'
+            }
             return httpx.Response(
                 200,
-                json={"errno": 0, "data": {"user_id": 123, "name": "private-name"}},
+                json={
+                    "errno": 0,
+                    "result": {"uk": 123, "username": "private-name", "loginstate": 1},
+                },
             )
         assert request.url.path == "/share/wxlist"
         assert request.url.params["channel"] == "weixin"
@@ -214,7 +226,10 @@ async def test_probe_uses_fixed_hosts_and_returns_only_structural_data() -> None
         "size",
     )
     assert progress == ["account", "share", "complete"]
-    assert [request.url.path for request in requests] == ["/mo/q/sync", "/share/wxlist"]
+    assert [request.url.path for request in requests] == [
+        "/api/gettemplatevariable",
+        "/share/wxlist",
+    ]
     serialized = json.dumps(asdict(report))
     for secret in (
         "private-name",
