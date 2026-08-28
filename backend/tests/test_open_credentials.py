@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.api.v1.cloud_accounts import _has_usable_open_credential
 from app.core.security import get_credential_cipher
 from app.models import Base, CloudAccount
 from app.providers.base import AccountProfile, DriveRef
@@ -9,7 +10,6 @@ from app.schemas.cloud_account import OpenCredentialConfigure
 from app.services.account_service import (
     DEFAULT_ALISTGO_TOKEN_URL,
     DEFAULT_OPENLIST_TOKEN_URL,
-    DEFAULT_PAN123_OPENLIST_TOKEN_URL,
     DEFAULT_QUARK_OPENLIST_TOKEN_URL,
     configure_open_credential,
     get_open_provider,
@@ -170,20 +170,11 @@ def test_configure_baidu_alistgo_uses_matching_public_app_credentials() -> None:
         assert provider.client_secret
 
 
-def test_configure_pan123_openlist_and_custom_credentials() -> None:
+def test_configure_pan123_custom_credentials() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         account = make_account(db, "pan123")
-        configure_open_credential(
-            db,
-            account,
-            OpenCredentialConfigure(mode="openlist", refresh_token="pan123-refresh"),
-        )
-        hosted = get_open_provider(account)
-        assert hosted.oauth_token_url == DEFAULT_PAN123_OPENLIST_TOKEN_URL
-        assert hosted.refresh_token == "pan123-refresh"
-
         configure_open_credential(
             db,
             account,
@@ -198,17 +189,30 @@ def test_configure_pan123_openlist_and_custom_credentials() -> None:
         assert custom.client_secret == "client-secret"
 
 
-def test_pan123_rejects_unrenewable_alistgo_token() -> None:
+@pytest.mark.parametrize("mode", ["alistgo", "openlist"])
+def test_pan123_rejects_public_hosted_login(mode: str) -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         account = make_account(db, "pan123")
-        with pytest.raises(ValueError, match="cannot be renewed outside AListGo"):
+        with pytest.raises(ValueError, match="public hosted login is unavailable"):
             configure_open_credential(
                 db,
                 account,
-                OpenCredentialConfigure(mode="alistgo", refresh_token="token"),
+                OpenCredentialConfigure(mode=mode, refresh_token="token"),
             )
+
+
+def test_pan123_stale_public_hosted_credential_does_not_override_private_api() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "pan123")
+        account.open_auth_mode = "openlist"
+        assert not _has_usable_open_credential(account)
+
+        account.open_auth_mode = "custom"
+        assert _has_usable_open_credential(account)
 
 
 def test_baidu_runtime_provider_combines_credentials_and_persists_open_rotation() -> None:

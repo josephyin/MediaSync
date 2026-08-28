@@ -46,7 +46,7 @@ Token 配置目标仓库的详情管理权限；否则工作流会保留警告�
 页面手动运行 `发布容器镜像`，填写已有标签，例如：
 
 ```text
-v0.2.0-rc.32
+v0.2.0-rc.33
 ```
 
 手动同步不会重新构建镜像。工作流会复制 GHCR 中的多架构 OCI 索引到 Docker
@@ -57,7 +57,7 @@ Hub，避免改变既有版本的代码或依赖。
 同步完成后，在未登录 Docker Hub 的环境检查两个多架构清单：
 
 ```bash
-docker manifest inspect <用户名>/mediasync:v0.2.0-rc.32
+docker manifest inspect <用户名>/mediasync:v0.2.0-rc.33
 ```
 
 清单必须同时包含：

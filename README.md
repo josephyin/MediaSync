@@ -12,12 +12,12 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 
 - ✅ 阿里云盘（MVP Provider；私有接口实验模式）
 - ✅ 夸克网盘（扫码 Cookie 覆盖完整转存；OpenAPI 可选，实验性）
-- ✅ 123 云盘（扫码私有登录；OpenList/自有 OpenAPI 可选，实验性）
+- ✅ 123 云盘（扫码私有登录；自有 OpenAPI 可选，实验性）
 - ✅ 百度网盘（扫码私有登录 + AListGo/OpenList/自有 OpenAPI，实验性）
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前候选版本为 `v0.2.0-rc.32`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘、夸克网盘、123 云盘和百度网盘 Web 私有接口可能随上游更新或账号风控失效。
+> 当前候选版本为 `v0.2.0-rc.33`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘、夸克网盘、123 云盘和百度网盘 Web 私有接口可能随上游更新或账号风控失效。
 
 ## MVP 功能
 
@@ -52,7 +52,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.32
+  josephyjq/mediasync:v0.2.0-rc.33
 ```
 
 访问 `http://NAS_IP:9090`，默认管理员用户名和密码均为 `admin`。首次登录后
@@ -70,7 +70,7 @@ docker run -d \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.32
+  josephyjq/mediasync:v0.2.0-rc.33
 ```
 
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
@@ -98,7 +98,7 @@ SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.32
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.33
 ```
 
 ```bash
@@ -173,7 +173,7 @@ OpenAPI 授权方式按网盘的真实续期能力提供，不强行做成相同
 |---|---|---|---|
 | 阿里云盘 | 支持 | 支持 | 支持 |
 | 夸克 | 不提供 | 支持，但还需要匹配的 AppID/SignKey | 不提供 |
-| 123 云盘 | 不提供；AListGo 网页 token 无法在外部独立续期 | 支持 | 支持 Client ID/Secret |
+| 123 云盘 | 不提供；AListGo 网页 token 无法在外部独立续期 | 不提供；公共节点依赖未配置的企业 OAuth 应用，实测跳转 404 | 支持 Client ID/Secret |
 | 百度网盘 | 支持，使用 AListGo 公开应用参数直接续期 | 支持 | 支持 |
 
 托管模式会把 Open refresh token 发送到所选服务的 Token URL，页面会明确提示风险；
@@ -238,7 +238,8 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.29` 百度网盘实验性 Provider 候选版
 - [x] 发布 `v0.2.0-rc.30` 简化账号授权与扫码登录候选版
 - [x] 发布 `v0.2.0-rc.31` 夸克扫码登录候选版
-- [ ] 发布 `v0.2.0-rc.32` 多网盘 OpenAPI 授权矩阵候选版
+- [x] 发布 `v0.2.0-rc.32` 多网盘 OpenAPI 授权矩阵候选版
+- [ ] 发布 `v0.2.0-rc.33` 授权入口修复候选版
 - [ ] 发布 `v0.2.0` 正式版
 - [x] 夸克网盘私有 Q2 只读适配
 - [x] 夸克网盘 OpenList OpenAPI 双凭证适配（待真实凭证验收）
