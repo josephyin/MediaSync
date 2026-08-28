@@ -54,8 +54,8 @@ const guidedLoginOptions: Record<string, GuidedLoginOption> = {
     provider: 'quark',
     title: '使用夸克 App 扫码',
     description: '登录成功后由 MediaSync 自动接收并安全保存登录凭证。',
-    action: '即将支持',
-    state: 'building',
+    action: '开始扫码',
+    state: 'available',
     icon: 'scan',
     privatePurpose: '读取分享内容',
     openApi: 'required',
@@ -105,7 +105,8 @@ const qrDialog = ref(false)
 const qrLoading = ref(false)
 const qrImage = ref('')
 const qrStatus = ref('请填写账号名称并生成二维码')
-const qrProviderId = ref<'aliyundrive' | 'pan123' | 'baidu'>('aliyundrive')
+type QrProviderId = 'aliyundrive' | 'quark' | 'pan123' | 'baidu'
+const qrProviderId = ref<QrProviderId>('aliyundrive')
 const qrForm = reactive<{ account_id: number | null; name: string }>({ account_id: null, name: '' })
 let qrTimer: number | undefined
 let qrSessionId = ''
@@ -124,6 +125,7 @@ const selectedAuthorizationSummary = computed(() => {
 const qrProviderLabel = computed(() => providerName(providers.value, qrProviderId.value))
 const openListAuthorizationPage = computed(() => openForm.token_url.includes('api-cn.oplist.org') ? 'https://api-cn.oplist.org' : 'https://api.oplist.org')
 const qrAppLabel = computed(() => {
+  if (qrProviderId.value === 'quark') return '夸克 App'
   if (qrProviderId.value === 'pan123') return '微信或 123 云盘 App'
   if (qrProviderId.value === 'baidu') return '百度网盘 App'
   return '阿里云盘 App'
@@ -144,7 +146,7 @@ function authorizationCountLabel(providerId: string) {
 }
 
 function providerInfo(providerId: string) { return findProvider(providers.value, providerId) }
-function supportsQrLogin(account: CloudAccount) { return ['aliyundrive', 'pan123', 'baidu'].includes(account.provider) }
+function supportsQrLogin(account: CloudAccount) { return ['aliyundrive', 'quark', 'pan123', 'baidu'].includes(account.provider) }
 function supportsOpenApi(account: CloudAccount) { return ['aliyundrive', 'quark', 'baidu'].includes(account.provider) }
 function openProviderName(account: CloudAccount | null) {
   return account ? `${providerName(providers.value, account.provider)} OpenAPI` : 'OpenAPI'
@@ -208,8 +210,8 @@ function startGuidedLogin() {
   const option = selectedGuidedOption.value
   if (!option || option.state !== 'available') return
   addDialog.value = false
-  if (option.provider === 'aliyundrive' || option.provider === 'pan123' || option.provider === 'baidu') {
-    openQr(undefined, option.provider)
+  if (['aliyundrive', 'quark', 'pan123', 'baidu'].includes(option.provider)) {
+    openQr(undefined, option.provider as QrProviderId)
   }
 }
 function openEdit(account: CloudAccount) {
@@ -349,12 +351,12 @@ function scheduleQrPolling(delay = qrPollDelay) {
   qrPollDelay = delay
   qrTimer = window.setTimeout(() => { void pollQr() }, delay)
 }
-function openQr(account?: CloudAccount, providerId?: 'aliyundrive' | 'pan123' | 'baidu') {
+function openQr(account?: CloudAccount, providerId?: QrProviderId) {
   stopQrPolling()
   qrSessionId = ''
   qrImage.value = ''
-  qrProviderId.value = account?.provider === 'pan123' || account?.provider === 'baidu'
-    ? account.provider
+  qrProviderId.value = account && ['aliyundrive', 'quark', 'pan123', 'baidu'].includes(account.provider)
+    ? account.provider as QrProviderId
     : (providerId ?? 'aliyundrive')
   qrStatus.value = account ? `生成二维码后使用${qrAppLabel.value}扫码` : '请填写账号名称并生成二维码'
   Object.assign(qrForm, { account_id: account?.id ?? null, name: account?.name ?? '' })
@@ -382,11 +384,11 @@ async function pollQr() {
       stopQrPolling()
       qrStatus.value = '登录成功，账号已保存'
       await load()
-      const needsBaiduOpenApi = qrProviderId.value === 'baidu' && result.account && !result.account.open_auth_mode
-      ElMessage.success(needsBaiduOpenApi ? '百度私有登录成功，请继续绑定 OpenAPI' : `${qrProviderLabel.value}登录成功`)
+      const needsRequiredOpenApi = ['quark', 'baidu'].includes(qrProviderId.value) && result.account && !result.account.open_auth_mode
+      ElMessage.success(needsRequiredOpenApi ? `${qrProviderLabel.value}私有登录成功，请继续绑定 OpenAPI` : `${qrProviderLabel.value}登录成功`)
       window.setTimeout(() => {
         qrDialog.value = false
-        if (needsBaiduOpenApi && result.account) openOpenApi(result.account)
+        if (needsRequiredOpenApi && result.account) openOpenApi(result.account)
       }, 600)
     }
   } catch (error) {

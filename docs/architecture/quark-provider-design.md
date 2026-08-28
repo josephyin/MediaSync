@@ -142,8 +142,10 @@ backend/app/providers/quark/
 
 ## 6. API 与前端
 
-首版沿用账号、订阅、文件、任务和系统信息 API，不建立夸克专用业务路由。认证
-流程若确实需要二维码或回调，再以独立设计补充最小认证端点。
+业务操作继续沿用账号、订阅、文件、任务和系统信息 API。账号认证增加最小的
+`/quark/qr-login/start` 与 `/quark/qr-login/{session_id}` 路由：二维码会话、token、
+service ticket 和 Cookie 只保存在 API 进程内，确认后复用通用账号加密与校验服务，
+不建立夸克专用持久化模型。
 
 `/system/info` 的 Provider 元数据应成为前端能力来源：
 

@@ -2,6 +2,33 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.31] - 2026-08-28
+
+这是夸克账号授权补全候选版本。在 rc.30 的分步账号授权页面中补齐夸克本地扫码
+登录，使阿里、夸克、123 和百度四个已启用 Provider 都不再以手工凭证作为推荐入口。
+
+### 新增
+
+- 新增夸克 App 二维码登录：本机生成二维码、轮询手机确认，并使用一次性 service
+  ticket 换取 Web Cookie 后立即加密保存和校验。
+- 新增账号与“重新扫码登录”两条夸克入口；私有登录成功后继续引导完成必需的
+  OpenList OpenAPI 授权。
+
+### 安全与可靠性
+
+- 二维码 token、service ticket 和 Cookie 只保存在当前 API 进程内；API 不返回
+  Cookie，日志不记录二维码内容或带 ticket 的完整请求 URL。
+- 固定并校验夸克 UOP、Pan 和扫码域名；拒绝非 HTTPS 基础地址、未知状态、超长
+  token 以及缺少 `__pus`/`__kps` 的不完整 Cookie。
+- 没有数据库迁移；现有夸克 Cookie 和 OpenAPI 配置保持兼容，手工 Cookie 入口继续
+  作为高级备用方式。
+
+### 验证
+
+- 夸克真实二维码生成和等待状态通过；扫码确认、Cookie 换取和 API 落库由模拟上游
+  自动化测试覆盖，正式发布前需完成一次真实手机确认验收。
+- 完整后端测试 769 项、前端测试 5 项、Ruff、前端生产构建和迁移往返通过。
+
 ## [0.2.0-rc.30] - 2026-08-28
 
 这是账号授权体验收口候选版本。新增 123 云盘和百度网盘本地扫码登录，并把不同
@@ -30,7 +57,7 @@ Provider 所需的私有登录与 OpenAPI 授权在账号页面中明确分步�
 - 123 云盘和百度网盘真实扫码登录通过；百度私有凭证与 OpenList OpenAPI 同账号
   校验通过。
 - 完整后端测试 765 项、前端测试 5 项、Ruff 和前端生产构建通过。
-- 公开 rc.30 双架构镜像和 NAS 一键升级仍需发布工作流及现场验证。
+- rc.30 主分支 CI、GitHub Prerelease、GHCR 与 Docker Hub 双架构同摘要镜像均通过。
 
 ## [0.2.0-rc.29] - 2026-08-27
 
@@ -805,6 +832,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.31]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.31
 [0.2.0-rc.30]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.30
 [0.2.0-rc.29]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.29
 [0.2.0-rc.28]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.28
