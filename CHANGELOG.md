@@ -11,8 +11,8 @@
 
 - 新增夸克 App 二维码登录：本机生成二维码、轮询手机确认，并使用一次性 service
   ticket 换取 Web Cookie 后立即加密保存和校验。
-- 新增账号与“重新扫码登录”两条夸克入口；私有登录成功后继续引导完成必需的
-  OpenList OpenAPI 授权。
+- 新增账号与“重新扫码登录”两条夸克入口；夸克 Cookie 单独覆盖完整转存链路，
+  OpenList OpenAPI 明确保留为可选增强。
 
 ### 安全与可靠性
 
@@ -22,6 +22,8 @@
   token 以及缺少 `__pus`/`__kps` 的不完整 Cookie。
 - 没有数据库迁移；现有夸克 Cookie 和 OpenAPI 配置保持兼容，手工 Cookie 入口继续
   作为高级备用方式。
+- 修正账号页面把夸克 OpenAPI 错标为必需的问题；没有配套 AppID/SignKey 时无需
+  配置 OpenAPI，不影响账号盘浏览、查重、建目录或分享转存。
 
 ### 验证
 

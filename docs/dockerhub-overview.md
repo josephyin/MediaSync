@@ -8,7 +8,7 @@ OpenList、SmartStrm、MoviePilot、Emby、Jellyfin 和飞牛影视构建自动�
 ## 支持状态
 
 - ✅ 阿里云盘
-- ✅ 夸克网盘（扫码 Cookie + OpenList OpenAPI 双凭证，实验性）
+- ✅ 夸克网盘（扫码 Cookie 覆盖完整转存；OpenAPI 可选，实验性）
 - ✅ 123 云盘（Access Token 私有接口，实验性）
 - ✅ 百度网盘（BDUSS + OpenList OpenAPI 双凭证，实验性）
 - ⬜ 115

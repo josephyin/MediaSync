@@ -57,9 +57,9 @@ const guidedLoginOptions: Record<string, GuidedLoginOption> = {
     action: '开始扫码',
     state: 'available',
     icon: 'scan',
-    privatePurpose: '读取分享内容',
-    openApi: 'required',
-    openApiPurpose: '浏览账号盘、查重并自动创建目录',
+    privatePurpose: '读取分享、浏览账号盘、查重、建目录并执行转存',
+    openApi: 'optional',
+    openApiPurpose: '备用的官方账号盘访问通道',
   },
   pan123: {
     provider: 'pan123',
@@ -384,7 +384,7 @@ async function pollQr() {
       stopQrPolling()
       qrStatus.value = '登录成功，账号已保存'
       await load()
-      const needsRequiredOpenApi = ['quark', 'baidu'].includes(qrProviderId.value) && result.account && !result.account.open_auth_mode
+      const needsRequiredOpenApi = qrProviderId.value === 'baidu' && result.account && !result.account.open_auth_mode
       ElMessage.success(needsRequiredOpenApi ? `${qrProviderLabel.value}私有登录成功，请继续绑定 OpenAPI` : `${qrProviderLabel.value}登录成功`)
       window.setTimeout(() => {
         qrDialog.value = false
@@ -456,7 +456,7 @@ onUnmounted(stopQrPolling)
 
         <div v-if="supportsOpenApi(account)" class="open-panel" :class="{ connected: account.open_auth_mode }">
           <div class="open-panel__title">
-            <div><span class="open-mark">O</span><div><strong>{{ providerName(providers, account.provider) }} OpenAPI</strong><p>{{ account.open_auth_mode ? `${openModeLabels[account.open_auth_mode]} 授权` : account.provider === 'aliyundrive' ? '可选，用于识别默认盘、资源库与备份盘' : '用于账号盘浏览、查重和目录能力' }}</p></div></div>
+            <div><span class="open-mark">O</span><div><strong>{{ providerName(providers, account.provider) }} OpenAPI</strong><p>{{ account.open_auth_mode ? `${openModeLabels[account.open_auth_mode]} 授权` : account.provider === 'aliyundrive' ? '可选，用于识别默认盘、资源库与备份盘' : account.provider === 'quark' ? '可选；Cookie 已覆盖浏览、查重、建目录和转存' : '用于账号盘浏览、查重和目录能力' }}</p></div></div>
             <el-tag v-if="account.open_status" size="small" :type="statusType(account.open_status)">{{ statusLabel(account.open_status) }}</el-tag>
             <span v-else class="muted">未绑定</span>
           </div>
@@ -571,7 +571,7 @@ onUnmounted(stopQrPolling)
 
     <el-dialog v-model="openDialog" :title="`绑定 ${openProviderName(openAccount)}`" width="min(560px, calc(100vw - 32px))">
       <el-alert v-if="openAccount?.provider === 'aliyundrive'" title="私有 token 继续负责分享监控和转存；Open token 只用于识别默认盘、资源库和备份盘。校验时会核对两边是否为同一账号。" type="info" :closable="false" class="open-alert" />
-      <el-alert v-else-if="openAccount?.provider === 'quark'" title="Cookie 私有接口负责分享读取；OpenList Open token 负责账号盘和目录。当前私有接口没有稳定 user_id，系统会分别校验两套凭证，但无法自动证明属于同一账号，请确认授权的是同一个夸克账号。" type="warning" :closable="false" class="open-alert" />
+      <el-alert v-else-if="openAccount?.provider === 'quark'" title="此项为可选增强。夸克 Cookie 已覆盖分享读取、账号盘浏览、查重、自动建目录和转存；没有匹配的 OpenAPI AppID/SignKey 时直接跳过，不影响正常使用。" type="info" :closable="false" class="open-alert" />
       <el-alert v-else title="BDUSS Cookie 负责分享读取和转存；OpenList Open token 负责账号盘浏览、查重和自动建目录。系统会校验两套凭证是否属于同一百度账号。" type="info" :closable="false" class="open-alert" />
       <el-form label-position="top">
         <el-form-item v-if="openAccount?.provider === 'aliyundrive'" label="授权方式">
@@ -587,7 +587,7 @@ onUnmounted(stopQrPolling)
           <div class="assistant-title"><AppIcon name="browser" :size="18" /><div><strong>OpenList 百度授权助手</strong><span>OpenList 当前不会把授权结果自动回传给 MediaSync，因此还需要一次复制；无需打开开发者工具。</span></div></div>
           <ol>
             <li><span>1</span><div>打开与你选择的刷新节点相同的授权站点：<el-link :href="openListAuthorizationPage" target="_blank" type="primary">打开 OpenList Token 工具</el-link></div></li>
-            <li><span>2</span><div>选择“百度网盘 (OAuth2) 验证登录”，勾选“使用 OpenList 提供的参数”，完成百度授权。</div></li>
+            <li><span>2</span><div>选择“百度网盘 验证登录”，勾选“使用 OpenList 提供的参数”，完成百度授权。</div></li>
             <li><span>3</span><div>复制页面中的 Refresh Token，回到这里点击读取。</div></li>
           </ol>
           <el-button plain type="primary" @click="importOpenTokenFromClipboard"><AppIcon name="copy" :size="15" />从剪贴板读取 Refresh Token</el-button>
@@ -615,8 +615,8 @@ onUnmounted(stopQrPolling)
           <div class="form-tip">自建 APIPages 可以直接粘贴对应 driver 的完整 HTTPS /renewapi 地址。</div>
         </el-form-item>
         <template v-if="openForm.mode === 'custom' || openAccount?.provider === 'quark'">
-          <el-form-item :label="openAccount?.provider === 'quark' ? 'AppID（必填）' : 'Client ID'"><el-input v-model="openForm.client_id" /></el-form-item>
-          <el-form-item :label="openAccount?.provider === 'quark' ? 'SignKey（新增时必填，编辑时留空表示不修改）' : 'Client Secret（编辑时留空表示不修改）'"><el-input v-model="openForm.client_secret" type="password" show-password /></el-form-item>
+          <el-form-item :label="openAccount?.provider === 'quark' ? 'AppID（启用此可选能力时必填）' : 'Client ID'"><el-input v-model="openForm.client_id" /></el-form-item>
+          <el-form-item :label="openAccount?.provider === 'quark' ? 'SignKey（启用此可选能力时必填）' : 'Client Secret（编辑时留空表示不修改）'"><el-input v-model="openForm.client_secret" type="password" show-password /></el-form-item>
         </template>
         <el-alert v-if="openAccount?.open_last_error" :title="openAccount.open_last_error" type="error" :closable="false" />
       </el-form>

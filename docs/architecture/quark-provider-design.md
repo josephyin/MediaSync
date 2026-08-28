@@ -32,9 +32,9 @@ MediaSync 已有通用 `CloudDriveProvider` 协议，扫描和转存 Service 依
 2. 维护者明确批准实验性 Web 私有接口路线，接受接口失效、账号风控和条款变化
    风险，并确认拟采用方式符合适用条款。
 
-维护者于 2026-08-25 确认采用双凭证模式：Cookie 私有接口负责分享链路；匹配的
-OpenList Refresh Token + AppID + SignKey 负责账号盘 OpenAPI。两套凭证不互相替代，
-只按声明的能力分工。
+维护者于 2026-08-25 批准实验性 Cookie 私有接口；后续真实转存验证确认 Cookie
+已经覆盖分享链路、账号盘浏览、查重、建目录和写入。匹配的 OpenList Refresh Token、
+AppID 和 SignKey 只保留为可选账号盘 OpenAPI，不是订阅或转存前置条件。
 
 Q0 静态能力验证结果见
 [夸克私有接口 Q0 验证记录](quark-private-api-q0.md)。
@@ -151,8 +151,8 @@ service ticket 和 Cookie 只保存在 API 进程内，确认后复用通用账�
 
 - Provider 选择器只展示注册表返回的类型和状态；
 - 账号表单按 Provider 和认证模式展示字段；
-- 夸克 OpenAPI 配置只允许 OpenList 模式，并显示必填的 Refresh Token、AppID、
-  SignKey；
+- 夸克 OpenAPI 配置只允许 OpenList 模式，并明确整项为可选；只有启用时才要求匹配的
+  Refresh Token、AppID 和 SignKey；
 - 订阅所选账号决定 Provider，服务端拒绝账号与订阅 Provider 不一致；
 - 夸克账号允许提交和校验；缺少 `share_save` 时不能提交订阅；
 - `share_save` 不可用时，界面只能做已声明的只读操作。
