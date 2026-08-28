@@ -9,6 +9,7 @@ from app.schemas.cloud_account import OpenCredentialConfigure
 from app.services.account_service import (
     DEFAULT_ALISTGO_TOKEN_URL,
     DEFAULT_OPENLIST_TOKEN_URL,
+    DEFAULT_PAN123_OPENLIST_TOKEN_URL,
     DEFAULT_QUARK_OPENLIST_TOKEN_URL,
     configure_open_credential,
     get_open_provider,
@@ -150,6 +151,66 @@ def test_configure_baidu_openlist_credential_requires_no_app_keys() -> None:
         assert provider.refresh_token == "baidu-refresh-token"
 
 
+def test_configure_baidu_alistgo_uses_matching_public_app_credentials() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "baidu")
+        configure_open_credential(
+            db,
+            account,
+            OpenCredentialConfigure(mode="alistgo", refresh_token="baidu-refresh-token"),
+        )
+
+        provider = get_open_provider(account)
+
+        assert account.open_token_url is None
+        assert provider.oauth_token_url is None
+        assert provider.client_id
+        assert provider.client_secret
+
+
+def test_configure_pan123_openlist_and_custom_credentials() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "pan123")
+        configure_open_credential(
+            db,
+            account,
+            OpenCredentialConfigure(mode="openlist", refresh_token="pan123-refresh"),
+        )
+        hosted = get_open_provider(account)
+        assert hosted.oauth_token_url == DEFAULT_PAN123_OPENLIST_TOKEN_URL
+        assert hosted.refresh_token == "pan123-refresh"
+
+        configure_open_credential(
+            db,
+            account,
+            OpenCredentialConfigure(
+                mode="custom", client_id="client-id", client_secret="client-secret"
+            ),
+        )
+        custom = get_open_provider(account)
+        assert account.open_refresh_token is None
+        assert custom.oauth_token_url is None
+        assert custom.client_id == "client-id"
+        assert custom.client_secret == "client-secret"
+
+
+def test_pan123_rejects_unrenewable_alistgo_token() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        account = make_account(db, "pan123")
+        with pytest.raises(ValueError, match="cannot be renewed outside AListGo"):
+            configure_open_credential(
+                db,
+                account,
+                OpenCredentialConfigure(mode="alistgo", refresh_token="token"),
+            )
+
+
 def test_baidu_runtime_provider_combines_credentials_and_persists_open_rotation() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -171,10 +232,7 @@ def test_baidu_runtime_provider_combines_credentials_and_persists_open_rotation(
         provider._open._refresh_token_update = "baidu-rotated-token"
 
         assert persist_provider_token(account, provider) is True
-        assert (
-            get_credential_cipher().decrypt(account.open_refresh_token)
-            == "baidu-rotated-token"
-        )
+        assert get_credential_cipher().decrypt(account.open_refresh_token) == "baidu-rotated-token"
 
 
 @pytest.mark.parametrize("mode", ["alistgo", "custom"])

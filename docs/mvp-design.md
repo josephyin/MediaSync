@@ -173,10 +173,10 @@ onedrive    -> OneDriveProvider         # 后续
 | last_verified_at | datetime | nullable |
 | last_error | text | nullable，必须脱敏 |
 | open_auth_mode | varchar(20) | nullable，alistgo/openlist/custom |
-| open_refresh_token | text | nullable，加密后的 Open token |
-| open_client_id | varchar(255) | nullable，自有应用 Client ID |
-| open_client_secret | text | nullable，加密后的 Client Secret |
-| open_token_url | text | nullable，AListGo 模式 HTTPS Token URL |
+| open_refresh_token | text | nullable，加密后的 Open token；123 自有应用模式不需要 |
+| open_client_id | varchar(255) | nullable，自有应用 Client ID 或 Provider 对应公开应用 ID |
+| open_client_secret | text | nullable，加密后的 Client Secret/SignKey |
+| open_token_url | text | nullable，AListGo/OpenList 托管刷新 HTTPS URL |
 | open_account_identity | varchar(255) | nullable，OpenAPI 账号标识 |
 | open_status | varchar(20) | nullable，pending/active/error |
 | open_last_verified_at | datetime | nullable |

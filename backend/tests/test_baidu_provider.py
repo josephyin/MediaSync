@@ -57,6 +57,41 @@ async def test_baidu_open_provider_refreshes_and_lists_account_drive() -> None:
     assert len([request for request in requests if request.url.host == "api.oplist.test"]) == 1
 
 
+async def test_baidu_open_provider_refreshes_directly_with_alistgo_app() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "openapi.baidu.com":
+            assert request.url.params["grant_type"] == "refresh_token"
+            assert request.url.params["refresh_token"] == "alist-refresh"
+            assert request.url.params["client_id"] == "alist-client"
+            assert request.url.params["client_secret"] == "alist-secret"
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "alist-access-token-long-enough",
+                    "refresh_token": "alist-refresh-rotated",
+                    "expires_in": 2592000,
+                },
+            )
+        assert request.url.path == "/rest/2.0/xpan/nas"
+        assert request.url.params["access_token"] == "alist-access-token-long-enough"
+        return httpx.Response(
+            200, json={"errno": 0, "uk": 12, "netdisk_name": "Baidu account"}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = BaiduOpenProvider(
+            "alist-refresh",
+            oauth_token_url=None,
+            client_id="alist-client",
+            client_secret="alist-secret",
+            http_client=client,
+        )
+        profile = await provider.validate_account()
+
+    assert profile.user_id == "12"
+    assert provider.consume_refresh_token_update() == "alist-refresh-rotated"
+
+
 async def test_baidu_private_provider_lists_share_root() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/gettemplatevariable":

@@ -2,6 +2,34 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.32] - 2026-08-28
+
+这是多网盘 OpenAPI 授权矩阵候选版本。账号向导不再把所有网盘强行显示为同一种
+授权方式，而是只提供对应 Provider 能够长期续期和实际调用的选项。
+
+### 新增
+
+- 123 云盘新增可选 OpenAPI：支持 OpenList APIPages refresh token 托管续期，也支持
+  用户自己的开放平台 Client ID/Secret；官方账号盘适配覆盖账号校验、目录浏览和建目录。
+- 百度网盘新增 AListGo 与自有应用两种直接 OAuth 续期方式，保留 OpenList APIPages，
+  三种方式都继续与 BDUSS 私有账号执行同账号校验。
+- 账号向导在扫码完成后直接进入 OpenAPI 授权选择；账号卡片增加明确的“选择授权方式”
+  入口，并在授权前展示每个网盘可用的方式和用途。
+
+### 安全与兼容
+
+- 123 不展示 AListGo 授权：AListGo 当前生成的 123 token 仍依赖其企业 OAuth 应用密钥
+  续期，不能在 MediaSync 中独立长期维护；后端也会拒绝误配。
+- 托管 Token URL 继续只接受不含凭据、查询参数和 fragment 的 HTTPS 地址；轮换后的
+  refresh token 立即加密持久化。
+- 没有数据库迁移；现有阿里、夸克和百度 OpenList 配置保持兼容。
+
+### 验证
+
+- 完整后端测试 775 项、前端测试 5 项、Ruff、前端生产构建和迁移往返通过。
+- AListGo/OpenList/官方 API 协议由模拟上游自动化测试覆盖；123 和百度新增授权方式仍需
+  使用真实账号完成候选版现场验收。
+
 ## [0.2.0-rc.31] - 2026-08-28
 
 这是夸克账号授权补全候选版本。在 rc.30 的分步账号授权页面中补齐夸克本地扫码
@@ -834,6 +862,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.32]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.32
 [0.2.0-rc.31]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.31
 [0.2.0-rc.30]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.30
 [0.2.0-rc.29]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.29
