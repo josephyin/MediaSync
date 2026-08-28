@@ -12,7 +12,6 @@ import httpx
 from app.core.exceptions import ProviderRequestError
 
 PAN_ORIGIN = "https://pan.baidu.com"
-TIEBA_ORIGIN = "https://tieba.baidu.com"
 DEFAULT_TIMEOUT_SECONDS = 15.0
 MAX_COOKIE_LENGTH = 32_768
 MAX_PAGE_SIZE = 100
@@ -196,14 +195,14 @@ class BaiduShareReadOnlyProbe:
         self,
         stage: str,
         method: Literal["GET", "POST"],
-        origin: Literal["https://pan.baidu.com", "https://tieba.baidu.com"],
+        origin: Literal["https://pan.baidu.com"],
         path: str,
         *,
         params: dict[str, object] | None = None,
         form: dict[str, object] | None = None,
     ) -> dict[str, object]:
         allowed = {
-            (TIEBA_ORIGIN, "/mo/q/sync"),
+            (PAN_ORIGIN, "/api/gettemplatevariable"),
             (PAN_ORIGIN, "/share/wxlist"),
             (PAN_ORIGIN, "/share/list"),
         }
@@ -294,17 +293,25 @@ class BaiduShareReadOnlyProbe:
     async def fetch_account(self) -> dict[str, object]:
         payload = await self._request(
             "Cookie account",
-            "GET",
-            TIEBA_ORIGIN,
-            "/mo/q/sync",
+            "POST",
+            PAN_ORIGIN,
+            "/api/gettemplatevariable",
+            params={
+                "channel": "chunlei",
+                "web": "1",
+                "app_id": "250528",
+                "clienttype": "0",
+            },
+            form={"fields": '["uk","username","loginstate"]'},
         )
-        data = payload.get("data")
-        user_id = data.get("user_id") if isinstance(data, dict) else None
-        if _safe_int(user_id) in (None, 0):
+        result = payload.get("result")
+        user_id = result.get("uk") if isinstance(result, dict) else None
+        login_state = result.get("loginstate") if isinstance(result, dict) else None
+        if _safe_int(user_id) in (None, 0) or _safe_int(login_state) != 1:
             raise BaiduShareUpstreamChangedError(
                 "Baidu Cookie account returned an unexpected response shape"
             )
-        return data
+        return result
 
     async def probe_share(
         self,
