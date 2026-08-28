@@ -72,6 +72,9 @@ docker manifest inspect <用户名>/mediasync:v0.2.0-rc.31
 
 - 同步成功：无需人工处理；
 - 同步失败：工作流输出警告，镜像发布结果保持成功；
+- 独立重试：在 GitHub Actions 手动运行“同步 Docker Hub 简介”，不会重新构建
+  或覆盖镜像；
+- 自动同步：`docs/dockerhub-overview.md` 合并到 `main` 后会运行同一个独立任务；
 - 手动回退：登录 Docker Hub，打开仓库 `General` 页面，编辑
   `Repository overview` 并复制该文档内容。
 
