@@ -4,8 +4,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Page } from '../api/client'
 import type { CloudAccount, ProviderInfo, SystemInfo } from '../api/types'
 import AppIcon from '../components/AppIcon.vue'
+import ProviderLogo from '../components/ProviderLogo.vue'
 import { formatDateTime, formatRelativeTime, openModeLabels, statusLabel, statusType } from '../utils/display'
-import { findProvider, providerAvailabilityLabel, providerMark, providerName, supportsCapabilities } from '../utils/providers'
+import { findProvider, providerAvailabilityLabel, providerName, supportsCapabilities } from '../utils/providers'
 
 interface QrStart { session_id: string; qr_code_data_url: string; expires_in: number }
 interface QrStatus { status: 'waiting' | 'scanned' | 'confirmed' | 'expired'; account?: CloudAccount }
@@ -100,8 +101,16 @@ const aliyunHostedTokenUrls = {
 const quarkOpenListTokenUrl = 'https://api.oplist.org/quarkyun/renewapi'
 const baiduOpenListTokenUrl = 'https://api.oplist.org/baiduyun/renewapi'
 const baiduAlistGoAuthorizeUrl = 'https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https%3A%2F%2Falistgo.com%2Ftool%2Fbaidu%2Fcallback&scope=basic%2Cnetdisk&qrcode=1'
+const aliyunAlistGoAuthorizeUrl = 'https://alistgo.com/zh/tool/aliyundrive/request.html'
+type OpenAuthMode = 'alistgo' | 'openlist' | 'custom'
+interface OpenModeOption {
+  value: OpenAuthMode
+  label: string
+  description: string
+  recommended?: boolean
+}
 const openForm = reactive({
-  mode: 'alistgo' as 'alistgo' | 'openlist' | 'custom',
+  mode: 'alistgo' as OpenAuthMode,
   refresh_token: '',
   token_url: aliyunHostedTokenUrls.alistgo as string,
   client_id: '',
@@ -131,16 +140,87 @@ const selectedAuthorizationSummary = computed(() => {
 })
 const qrProviderLabel = computed(() => providerName(providers.value, qrProviderId.value))
 const openListAuthorizationPage = computed(() => openForm.token_url.includes('api-cn.oplist.org') ? 'https://api-cn.oplist.org' : 'https://api.oplist.org')
-const availableOpenModes = computed(() => {
-  if (openAccount.value?.provider === 'quark') return [{ value: 'openlist', label: 'OpenList APIPages' }]
+const availableOpenModes = computed<OpenModeOption[]>(() => {
+  if (openAccount.value?.provider === 'quark') return [{
+    value: 'openlist',
+    label: 'OpenList APIPages',
+    description: '使用 OpenList 获取 Refresh Token，同时填写匹配的 AppID 和 SignKey。',
+  }]
   if (openAccount.value?.provider === 'pan123') return [
-    { value: 'custom', label: '自有 OpenAPI 应用' },
+    {
+      value: 'custom',
+      label: '自有 OpenAPI 应用',
+      description: '使用你在 123 开放平台申请的 Client ID 和 Client Secret。',
+    },
   ]
   return [
-    { value: 'alistgo', label: 'AListGo 授权' },
-    { value: 'openlist', label: 'OpenList APIPages' },
-    { value: 'custom', label: '自有 OpenAPI 应用' },
+    {
+      value: 'alistgo',
+      label: 'AListGo 授权',
+      description: '使用 AListGo 公开应用获取 Refresh Token，步骤最少。',
+      recommended: true,
+    },
+    {
+      value: 'openlist',
+      label: 'OpenList APIPages',
+      description: '使用 OpenList 授权工具，可选择公开或自建刷新节点。',
+    },
+    {
+      value: 'custom',
+      label: '自有 OpenAPI 应用',
+      description: '使用自己的 Client ID、Client Secret 和对应 Refresh Token。',
+    },
   ]
+})
+const openProviderGuide = computed(() => {
+  switch (openAccount.value?.provider) {
+    case 'aliyundrive':
+      return {
+        requirement: '可选增强',
+        tagType: 'info' as const,
+        privateCoverage: '分享监控与转存',
+        openCoverage: '识别默认盘、资源库和备份盘',
+        verification: '保存时会校验私有登录与 OpenAPI 是否属于同一账号。',
+      }
+    case 'quark':
+      return {
+        requirement: '可跳过',
+        tagType: 'info' as const,
+        privateCoverage: '分享读取、账号盘浏览、查重、建目录与转存',
+        openCoverage: '备用的官方账号盘访问通道',
+        verification: '扫码 Cookie 已覆盖完整流程，没有 AppID/SignKey 时无需绑定。',
+      }
+    case 'pan123':
+      return {
+        requirement: '高级选项',
+        tagType: 'info' as const,
+        privateCoverage: '分享读取、账号盘浏览、建目录与转存',
+        openCoverage: '使用自有开放平台应用访问账号盘',
+        verification: '普通用户使用扫码登录即可；这里只面向已有开放平台应用的用户。',
+      }
+    default:
+      return {
+        requirement: '完整功能所需',
+        tagType: 'warning' as const,
+        privateCoverage: '分享读取与转存',
+        openCoverage: '账号盘浏览、查重与自动创建目录',
+        verification: '保存时会校验 BDUSS 与 OpenAPI 是否属于同一百度账号。',
+      }
+  }
+})
+const selectedOpenMode = computed(() => availableOpenModes.value.find((item) => item.value === openForm.mode))
+const openListDriverName = computed(() => {
+  if (openAccount.value?.provider === 'quark') return '夸克网盘 (OAuth2) 验证登录'
+  if (openAccount.value?.provider === 'baidu') return '百度网盘 验证登录'
+  return '阿里云盘 (OAuth2) 扫码登录'
+})
+const alistGoAuthorizationUrl = computed(() => openAccount.value?.provider === 'baidu' ? baiduAlistGoAuthorizeUrl : aliyunAlistGoAuthorizeUrl)
+const hostedCredentialNotice = computed(() => {
+  if (openForm.mode === 'custom') return '凭证只会发送给对应网盘的官方 OpenAPI。'
+  if (openForm.mode === 'alistgo' && openAccount.value?.provider === 'baidu') {
+    return 'Refresh Token 由 AListGo 公开应用签发，MediaSync 使用同一组公开应用参数在本机续期。'
+  }
+  return 'Refresh Token 会发送到所选托管刷新服务；不同服务签发的 Token 不能混用。'
 })
 const qrAppLabel = computed(() => {
   if (qrProviderId.value === 'quark') return '夸克 App'
@@ -174,7 +254,7 @@ function defaultOpenMode(account: CloudAccount) {
   if (account.provider === 'pan123') return 'custom'
   return 'alistgo'
 }
-function defaultOpenTokenUrl(account: CloudAccount, mode: 'alistgo' | 'openlist' | 'custom') {
+function defaultOpenTokenUrl(account: CloudAccount, mode: OpenAuthMode) {
   if (account.provider === 'quark') return quarkOpenListTokenUrl
   if (account.provider === 'pan123') return ''
   if (account.provider === 'baidu') return mode === 'openlist' ? baiduOpenListTokenUrl : ''
@@ -293,7 +373,7 @@ function openOpenApi(account: CloudAccount) {
   })
   openDialog.value = true
 }
-function openModeChanged(mode: 'alistgo' | 'openlist' | 'custom') {
+function openModeChanged(mode: OpenAuthMode) {
   if (openAccount.value) {
     openForm.token_url = defaultOpenTokenUrl(openAccount.value, mode)
   }
@@ -465,7 +545,7 @@ onUnmounted(stopQrPolling)
     <div v-loading="pageLoading" class="account-grid">
       <article v-for="account in accounts" :key="account.id" class="account-card">
         <header class="account-card__header">
-          <div class="account-brand"><span class="account-logo">{{ providerMark(providers, account.provider) }}</span><div><h3>{{ account.name }}</h3><p>{{ account.account_identity || '账号信息待校验' }}</p></div></div>
+          <div class="account-brand"><ProviderLogo class="account-logo" :provider="account.provider" :size="42" /><div><h3>{{ account.name }}</h3><p>{{ account.account_identity || '账号信息待校验' }}</p></div></div>
           <el-tag :type="statusType(account.status)" effect="light">{{ statusLabel(account.status) }}</el-tag>
         </header>
 
@@ -477,7 +557,7 @@ onUnmounted(stopQrPolling)
 
         <div v-if="supportsOpenApi(account)" class="open-panel" :class="{ connected: account.open_auth_mode }">
           <div class="open-panel__title">
-            <div><span class="open-mark">O</span><div><strong>{{ providerName(providers, account.provider) }} OpenAPI</strong><p>{{ account.provider === 'pan123' && account.open_auth_mode === 'openlist' ? '公共 OpenList 已停用，请改用自有应用或解绑' : account.open_auth_mode ? `${openModeLabels[account.open_auth_mode]} 授权` : account.provider === 'aliyundrive' ? '可选，用于识别默认盘、资源库与备份盘' : account.provider === 'quark' ? '可选；Cookie 已覆盖浏览、查重、建目录和转存' : '用于账号盘浏览、查重和目录能力' }}</p></div></div>
+            <div><ProviderLogo :provider="account.provider" :size="30" /><div><strong>{{ providerName(providers, account.provider) }} OpenAPI</strong><p>{{ account.provider === 'pan123' && account.open_auth_mode === 'openlist' ? '公共 OpenList 已停用，请改用自有应用或解绑' : account.open_auth_mode ? `${openModeLabels[account.open_auth_mode]} 授权` : account.provider === 'aliyundrive' ? '可选，用于识别默认盘、资源库与备份盘' : account.provider === 'quark' ? '可选；Cookie 已覆盖浏览、查重、建目录和转存' : '用于账号盘浏览、查重和目录能力' }}</p></div></div>
             <div class="open-panel__action">
               <el-tag v-if="account.open_status" size="small" :type="statusType(account.open_status)">{{ statusLabel(account.open_status) }}</el-tag>
               <span v-else class="muted">未绑定</span>
@@ -523,7 +603,7 @@ onUnmounted(stopQrPolling)
 
       <div v-if="addStep === 1" class="provider-picker">
         <button v-for="provider in enabledProviders" :key="provider.id" class="provider-choice" type="button" @click="selectProvider(provider.id)">
-          <span class="provider-choice__logo" :data-provider="provider.id">{{ providerMark(providers, provider.id) }}</span>
+          <ProviderLogo class="provider-choice__logo" :provider="provider.id" :size="46" />
           <span class="provider-choice__copy"><strong>{{ provider.name }}</strong><small>{{ authorizationSummary(provider.id) }}</small></span>
           <span class="auth-count" :class="{ double: guidedLoginOptions[provider.id]?.openApi !== 'none' }">{{ authorizationCountLabel(provider.id) }}</span>
           <AppIcon name="arrow" :size="17" />
@@ -532,7 +612,7 @@ onUnmounted(stopQrPolling)
 
       <div v-else class="login-methods">
         <div class="provider-selected">
-          <span class="provider-choice__logo" :data-provider="selectedProviderId">{{ providerMark(providers, selectedProviderId) }}</span>
+          <ProviderLogo class="provider-choice__logo" :provider="selectedProviderId" :size="46" />
           <div><strong>{{ selectedProvider?.name }}</strong><small>{{ selectedAuthorizationSummary }}</small></div>
         </div>
 
@@ -593,63 +673,90 @@ onUnmounted(stopQrPolling)
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="loading" @click="save">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="openDialog" :title="`绑定 ${openProviderName(openAccount)}`" width="min(560px, calc(100vw - 32px))">
-      <el-alert v-if="openAccount?.provider === 'aliyundrive'" title="私有 token 继续负责分享监控和转存；Open token 只用于识别默认盘、资源库和备份盘。校验时会核对两边是否为同一账号。" type="info" :closable="false" class="open-alert" />
-      <el-alert v-else-if="openAccount?.provider === 'quark'" title="此项为可选增强。夸克 Cookie 已覆盖分享读取、账号盘浏览、查重、自动建目录和转存；没有匹配的 OpenAPI AppID/SignKey 时直接跳过，不影响正常使用。" type="info" :closable="false" class="open-alert" />
-      <el-alert v-else-if="openAccount?.provider === 'pan123'" title="扫码登录已覆盖分享读取、账号盘浏览、建目录和转存，无需 OpenAPI。公共 OpenList 的 123 OAuth 依赖节点自备企业应用，实际跳转可能返回 404；这里只保留使用自己 Client ID/Secret 的高级方式。" type="info" :closable="false" class="open-alert" />
-      <el-alert v-else title="BDUSS Cookie 负责分享读取和转存；OpenAPI 负责账号盘浏览、查重和自动建目录。系统会校验两套凭证是否属于同一百度账号。" type="info" :closable="false" class="open-alert" />
-      <el-form label-position="top">
-        <el-form-item label="授权方式">
-          <el-radio-group v-model="openForm.mode" @change="openModeChanged">
-            <el-radio v-for="mode in availableOpenModes" :key="mode.value" :value="mode.value">{{ mode.label }}</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-alert v-if="openForm.mode === 'openlist' || (openForm.mode === 'alistgo' && openAccount?.provider === 'aliyundrive')" title="托管模式会把 Open refresh token 发送到下面的 Token URL。不同服务签发的 token 不能混用，请只使用你信任的服务。" type="warning" :closable="false" class="open-alert" />
-        <div v-if="openForm.mode === 'alistgo' && openAccount?.provider === 'baidu'" class="openlist-assistant">
-          <div class="assistant-title"><AppIcon name="browser" :size="18" /><div><strong>AListGo 百度授权助手</strong><span>使用 AListGo 官方公开应用完成授权，MediaSync 使用同一组公开应用参数在本机续期。</span></div></div>
+    <el-dialog v-model="openDialog" :title="`绑定 ${openProviderName(openAccount)}`" width="min(680px, calc(100vw - 32px))" class="openapi-dialog">
+      <div class="openapi-overview">
+        <div class="openapi-overview__heading">
+          <ProviderLogo :provider="openAccount?.provider ?? ''" :size="34" />
+          <div><strong>{{ openProviderName(openAccount) }}</strong><span>{{ openProviderGuide.verification }}</span></div>
+          <el-tag size="small" :type="openProviderGuide.tagType" effect="plain">{{ openProviderGuide.requirement }}</el-tag>
+        </div>
+        <div class="openapi-coverage">
+          <div><span>私有登录负责</span><strong>{{ openProviderGuide.privateCoverage }}</strong></div>
+          <AppIcon name="arrow" :size="15" />
+          <div><span>OpenAPI 补充</span><strong>{{ openProviderGuide.openCoverage }}</strong></div>
+        </div>
+      </div>
+
+      <div class="openapi-section">
+        <div class="openapi-section__title"><i>1</i><div><strong>选择授权来源</strong><span>只显示这个网盘能够长期使用的方式</span></div></div>
+        <el-radio-group v-model="openForm.mode" class="open-mode-grid" @change="openModeChanged">
+          <el-radio v-for="mode in availableOpenModes" :key="mode.value" :value="mode.value" class="open-mode-card" :class="{ selected: openForm.mode === mode.value }">
+            <span class="open-mode-card__copy">
+              <span class="open-mode-card__heading"><strong>{{ mode.label }}</strong><em v-if="mode.recommended">推荐</em></span>
+              <small>{{ mode.description }}</small>
+            </span>
+          </el-radio>
+        </el-radio-group>
+      </div>
+
+      <div class="openapi-section">
+        <div class="openapi-section__title"><i>2</i><div><strong>获取授权凭证</strong><span>{{ selectedOpenMode?.label }}</span></div></div>
+        <div v-if="openForm.mode === 'alistgo'" class="openlist-assistant unified-assistant">
+          <div class="assistant-title"><AppIcon name="browser" :size="18" /><div><strong>通过 AListGo 获取 Refresh Token</strong><span>无需打开开发者工具，授权后只需复制一次 Token。</span></div></div>
           <ol>
-            <li><span>1</span><div><el-link :href="baiduAlistGoAuthorizeUrl" target="_blank" type="primary">打开百度 OAuth 授权</el-link>并完成登录；授权结果会返回 AListGo 回调页。</div></li>
-            <li><span>2</span><div>复制页面中的 Refresh Token，再回到这里读取或粘贴。</div></li>
+            <li><span>1</span><div><el-link :href="alistGoAuthorizationUrl" target="_blank" type="primary">打开 {{ openAccount?.provider === 'baidu' ? '百度 OAuth 授权' : 'AListGo 授权工具' }}</el-link>并完成账号授权。</div></li>
+            <li><span>2</span><div>复制授权结果中的 Refresh Token，回到这里读取或粘贴。</div></li>
           </ol>
           <el-button plain type="primary" @click="importOpenTokenFromClipboard"><AppIcon name="copy" :size="15" />从剪贴板读取 Refresh Token</el-button>
         </div>
-        <div v-if="openForm.mode === 'openlist' && openAccount?.provider === 'baidu'" class="openlist-assistant">
-          <div class="assistant-title"><AppIcon name="browser" :size="18" /><div><strong>OpenList 百度授权助手</strong><span>OpenList 当前不会把授权结果自动回传给 MediaSync，因此还需要一次复制；无需打开开发者工具。</span></div></div>
+        <div v-else-if="openForm.mode === 'openlist'" class="openlist-assistant unified-assistant">
+          <div class="assistant-title"><AppIcon name="browser" :size="18" /><div><strong>通过 OpenList APIPages 获取 Refresh Token</strong><span>授权工具和刷新节点必须选择同一站点。</span></div></div>
           <ol>
-            <li><span>1</span><div>打开与你选择的刷新节点相同的授权站点：<el-link :href="openListAuthorizationPage" target="_blank" type="primary">打开 OpenList Token 工具</el-link></div></li>
-            <li><span>2</span><div>选择“百度网盘 验证登录”，勾选“使用 OpenList 提供的参数”，完成百度授权。</div></li>
-            <li><span>3</span><div>复制页面中的 Refresh Token，回到这里点击读取。</div></li>
+            <li><span>1</span><div><el-link :href="openListAuthorizationPage" target="_blank" type="primary">打开 OpenList Token 工具</el-link>，选择“{{ openListDriverName }}”。</div></li>
+            <li><span>2</span><div>完成授权并复制 Refresh Token<span v-if="openAccount?.provider === 'quark'">；同时保留页面使用的 AppID 和 SignKey</span>。</div></li>
+            <li><span>3</span><div>回到这里选择同一刷新节点，然后读取或粘贴 Token。</div></li>
           </ol>
           <el-button plain type="primary" @click="importOpenTokenFromClipboard"><AppIcon name="copy" :size="15" />从剪贴板读取 Refresh Token</el-button>
         </div>
-        <el-alert v-else-if="openForm.mode === 'openlist'" type="info" :closable="false" class="open-alert">
-          <template #title>请在 OpenList APIPages 选择“{{ openAccount?.provider === 'quark' ? '夸克网盘 (OAuth2) 验证登录' : openAccount?.provider === 'baidu' ? '百度网盘 验证登录' : openAccount?.provider === 'pan123' ? '123 云盘 Open 验证登录' : '阿里云盘 (OAuth2) 扫码登录' }}”获取专用 token，并在下方选择同一节点：<el-link href="https://api.oplist.org.cn" target="_blank" type="primary">国内站</el-link> · <el-link href="https://api.oplist.org" target="_blank" type="primary">全球站</el-link></template>
-        </el-alert>
-        <el-form-item v-if="!(openAccount?.provider === 'pan123' && openForm.mode === 'custom')" label="Open Refresh Token（编辑时留空表示不修改）"><el-input v-model="openForm.refresh_token" type="password" show-password /></el-form-item>
-        <el-form-item v-if="openForm.mode === 'alistgo' && openForm.token_url" label="托管 Token URL"><el-input v-model="openForm.token_url" /></el-form-item>
-        <el-form-item v-else-if="openForm.mode === 'openlist'" label="OpenList 刷新节点">
-          <el-select v-model="openForm.token_url" filterable allow-create default-first-option class="full-width">
-            <template v-if="openAccount?.provider === 'quark'">
-              <el-option label="OpenList 全球站" value="https://api.oplist.org/quarkyun/renewapi" />
-              <el-option label="OpenList 国内站" value="https://api-cn.oplist.org/quarkyun/renewapi" />
-            </template>
-            <template v-else-if="openAccount?.provider === 'baidu'">
-              <el-option label="OpenList 全球站" value="https://api.oplist.org/baiduyun/renewapi" />
-              <el-option label="OpenList 国内站" value="https://api-cn.oplist.org/baiduyun/renewapi" />
-            </template>
-            <template v-else>
-              <el-option label="OpenList 国内站" value="https://api.oplist.org.cn/alicloud/renewapi" />
-              <el-option label="OpenList 全球站" value="https://api.oplist.org/alicloud/renewapi" />
-            </template>
-          </el-select>
-          <div class="form-tip">自建 APIPages 可以直接粘贴对应 driver 的完整 HTTPS /renewapi 地址。</div>
-        </el-form-item>
-        <template v-if="openForm.mode === 'custom' || openAccount?.provider === 'quark'">
-          <el-form-item :label="openAccount?.provider === 'quark' ? 'AppID（启用此可选能力时必填）' : 'Client ID'"><el-input v-model="openForm.client_id" /></el-form-item>
-          <el-form-item :label="openAccount?.provider === 'quark' ? 'SignKey（启用此可选能力时必填）' : 'Client Secret（编辑时留空表示不修改）'"><el-input v-model="openForm.client_secret" type="password" show-password /></el-form-item>
-        </template>
-        <el-alert v-if="openAccount?.open_last_error" :title="openAccount.open_last_error" type="error" :closable="false" />
-      </el-form>
+        <div v-else class="openlist-assistant unified-assistant custom-assistant">
+          <div class="assistant-title"><AppIcon name="key" :size="18" /><div><strong>使用自己的开放平台应用</strong><span>{{ openAccount?.provider === 'pan123' ? '填写开放平台提供的 Client ID 和 Client Secret，无需 Refresh Token。' : '使用同一个应用完成 OAuth 授权，并准备对应的 Refresh Token、Client ID 和 Client Secret。' }}</span></div></div>
+        </div>
+        <div class="openapi-security-note" :class="{ hosted: openForm.mode !== 'custom' }"><AppIcon :name="openForm.mode === 'custom' ? 'shield' : 'external'" :size="15" /><span>{{ hostedCredentialNotice }}</span></div>
+      </div>
+
+      <div class="openapi-section">
+        <div class="openapi-section__title"><i>3</i><div><strong>填写并校验</strong><span>敏感字段会加密保存；编辑时留空表示不修改</span></div></div>
+        <el-form label-position="top" class="openapi-form">
+          <el-form-item v-if="!(openAccount?.provider === 'pan123' && openForm.mode === 'custom')" label="Refresh Token">
+            <el-input v-model="openForm.refresh_token" type="password" show-password placeholder="粘贴授权工具返回的 Refresh Token" />
+          </el-form-item>
+          <el-form-item v-if="openForm.mode === 'openlist'" label="OpenList 刷新节点">
+            <el-select v-model="openForm.token_url" filterable allow-create default-first-option class="full-width">
+              <template v-if="openAccount?.provider === 'quark'">
+                <el-option label="OpenList 全球站" value="https://api.oplist.org/quarkyun/renewapi" />
+                <el-option label="OpenList 国内站" value="https://api-cn.oplist.org/quarkyun/renewapi" />
+              </template>
+              <template v-else-if="openAccount?.provider === 'baidu'">
+                <el-option label="OpenList 全球站" value="https://api.oplist.org/baiduyun/renewapi" />
+                <el-option label="OpenList 国内站" value="https://api-cn.oplist.org/baiduyun/renewapi" />
+              </template>
+              <template v-else>
+                <el-option label="OpenList 国内站" value="https://api.oplist.org.cn/alicloud/renewapi" />
+                <el-option label="OpenList 全球站" value="https://api.oplist.org/alicloud/renewapi" />
+              </template>
+            </el-select>
+            <div class="form-tip">自建 APIPages 可以粘贴对应 driver 的完整 HTTPS /renewapi 地址。</div>
+          </el-form-item>
+          <template v-if="openForm.mode === 'custom' || openAccount?.provider === 'quark'">
+            <el-form-item :label="openAccount?.provider === 'quark' ? 'AppID' : 'Client ID'"><el-input v-model="openForm.client_id" /></el-form-item>
+            <el-form-item :label="openAccount?.provider === 'quark' ? 'SignKey' : 'Client Secret'"><el-input v-model="openForm.client_secret" type="password" show-password /></el-form-item>
+          </template>
+          <el-collapse v-if="openForm.mode === 'alistgo' && openForm.token_url" class="openapi-advanced">
+            <el-collapse-item title="高级设置" name="advanced"><el-form-item label="托管 Token URL"><el-input v-model="openForm.token_url" /></el-form-item></el-collapse-item>
+          </el-collapse>
+          <el-alert v-if="openAccount?.open_last_error" :title="openAccount.open_last_error" type="error" :closable="false" />
+        </el-form>
+      </div>
       <template #footer><el-button v-if="openAccount?.open_auth_mode" type="danger" plain @click="unbindOpenApi">解绑</el-button><el-button @click="openDialog = false">取消</el-button><el-button type="primary" :loading="openLoading" @click="saveOpenApi">保存并校验</el-button></template>
     </el-dialog>
 
@@ -677,7 +784,6 @@ onUnmounted(stopQrPolling)
 .account-card__header, .account-brand, .open-panel__title, .open-panel__title > div, .account-actions { display: flex; align-items: center; }
 .account-card__header { justify-content: space-between; gap: 16px; }
 .account-brand { gap: 12px; min-width: 0; }
-.account-logo { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: #fff; background: linear-gradient(135deg, #6c5ce7, #2898ff); font-size: 13px; font-weight: 800; box-shadow: 0 8px 18px rgb(78 92 224 / 24%); }
 .account-brand h3 { margin: 0 0 4px; font-size: 17px; }
 .account-brand p, .open-panel p { margin: 0; color: var(--text-secondary); font-size: 13px; }
 .account-facts { display: grid; grid-template-columns: .8fr 1.35fr 1fr; gap: 12px; }
@@ -691,7 +797,6 @@ onUnmounted(stopQrPolling)
 .open-panel__action { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .open-panel__title > div { gap: 10px; min-width: 0; }
 .open-panel__title strong { display: block; margin-bottom: 2px; font-size: 13px; }
-.open-mark { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 9px; color: #fff; background: #2f80ed; font-size: 12px; font-weight: 800; }
 .open-identity { margin-top: 10px !important; padding-top: 10px; border-top: 1px dashed #d8e2ef; }
 .account-error { margin-top: 10px !important; color: var(--danger) !important; line-height: 1.5; }
 .account-actions { margin-top: auto; gap: 8px; padding-top: 2px; border-top: 1px solid #f0f2f5; }
@@ -703,6 +808,45 @@ onUnmounted(stopQrPolling)
 .qr-image { width: 220px; height: 220px; background: #fff; border-radius: 8px; }
 .qr-login p { color: var(--el-text-color-secondary); }
 .open-alert { margin-bottom: 18px; }
+.openapi-overview { display: grid; gap: 14px; margin-bottom: 18px; padding: 16px; border: 1px solid #dce3ff; border-radius: 15px; background: linear-gradient(105deg, #f7f8ff, #fff); }
+.openapi-overview__heading { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 11px; }
+.openapi-overview__heading > div { min-width: 0; }
+.openapi-overview__heading strong, .openapi-overview__heading span { display: block; }
+.openapi-overview__heading strong { color: #1d2939; font-size: 14px; }
+.openapi-overview__heading span { margin-top: 3px; color: #667085; font-size: 11px; line-height: 1.5; }
+.openapi-coverage { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); align-items: center; gap: 8px; }
+.openapi-coverage > div { min-width: 0; padding: 10px 12px; border-radius: 10px; background: rgb(255 255 255 / 82%); }
+.openapi-coverage span, .openapi-coverage strong { display: block; }
+.openapi-coverage span { color: #98a2b3; font-size: 10px; }
+.openapi-coverage strong { margin-top: 3px; color: #344054; font-size: 11px; line-height: 1.45; }
+.openapi-coverage > .app-icon { color: #98a2b3; }
+.openapi-section { display: grid; gap: 13px; padding: 18px 0; border-top: 1px solid #eef0f4; }
+.openapi-section__title { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 10px; }
+.openapi-section__title i { display: grid; place-items: center; width: 28px; height: 28px; color: #fff; border-radius: 50%; background: #4f46e5; font-size: 11px; font-style: normal; font-weight: 800; }
+.openapi-section__title strong, .openapi-section__title span { display: block; }
+.openapi-section__title strong { color: #1d2939; font-size: 13px; }
+.openapi-section__title span { margin-top: 2px; color: #98a2b3; font-size: 10px; }
+.open-mode-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; }
+:deep(.open-mode-card.el-radio) { display: flex; align-items: flex-start; width: 100%; height: auto; margin: 0; padding: 13px; white-space: normal; border: 1px solid #e4e7ec; border-radius: 12px; background: #fff; transition: .16s ease; }
+:deep(.open-mode-card.el-radio:hover) { border-color: #a5b4fc; }
+:deep(.open-mode-card.el-radio.selected) { border-color: #818cf8; background: #f7f7ff; box-shadow: 0 5px 16px rgb(79 70 229 / 8%); }
+:deep(.open-mode-card .el-radio__input) { margin-top: 2px; }
+:deep(.open-mode-card .el-radio__label) { min-width: 0; padding-left: 8px; color: inherit; white-space: normal; }
+.open-mode-card__copy, .open-mode-card__heading, .open-mode-card__copy small { display: block; }
+.open-mode-card__heading { display: flex; align-items: center; gap: 5px; color: #344054; }
+.open-mode-card__heading strong { font-size: 12px; }
+.open-mode-card__heading em { padding: 2px 5px; color: #4338ca; border-radius: 999px; background: #e9eaff; font-size: 8px; font-style: normal; font-weight: 700; }
+.open-mode-card__copy small { margin-top: 5px; color: #98a2b3; font-size: 9px; line-height: 1.45; }
+.unified-assistant { margin: 0; }
+.custom-assistant { padding-bottom: 15px; }
+.openapi-security-note { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; color: #3f6b57; border-radius: 10px; background: #f1f8f4; font-size: 10px; line-height: 1.55; }
+.openapi-security-note.hosted { color: #8a6116; background: #fff8e8; }
+.openapi-security-note .app-icon { flex: 0 0 auto; margin-top: 1px; }
+.openapi-form { padding-left: 38px; }
+.openapi-advanced { border: 0; }
+:deep(.openapi-advanced .el-collapse-item__header) { height: 36px; color: #667085; font-size: 11px; border: 0; }
+:deep(.openapi-advanced .el-collapse-item__wrap) { border: 0; }
+:deep(.openapi-advanced .el-collapse-item__content) { padding-bottom: 0; }
 .openlist-assistant { display: grid; gap: 13px; margin-bottom: 18px; padding: 15px; border: 1px solid #c7d2fe; border-radius: 13px; background: #f8f9ff; }
 .assistant-title { display: flex; align-items: flex-start; gap: 9px; color: #4338ca; }
 .assistant-title > div { min-width: 0; }
@@ -726,10 +870,6 @@ onUnmounted(stopQrPolling)
 .provider-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 4px 0 8px; }
 .provider-choice { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto 18px; align-items: center; gap: 12px; min-height: 78px; padding: 14px; text-align: left; cursor: pointer; color: #344054; border: 1px solid #e4e7ec; border-radius: 14px; background: #fff; transition: .18s ease; }
 .provider-choice:hover { border-color: #a5b4fc; box-shadow: 0 9px 24px rgba(79,70,229,.08); transform: translateY(-1px); }
-.provider-choice__logo { display: grid; place-items: center; width: 46px; height: 46px; color: #fff; border-radius: 13px; background: linear-gradient(135deg, #6c5ce7, #2898ff); font-size: 12px; font-weight: 800; }
-.provider-choice__logo[data-provider="quark"] { background: linear-gradient(135deg, #ff6a00, #ff9b31); }
-.provider-choice__logo[data-provider="pan123"] { background: linear-gradient(135deg, #1687ff, #15b5ff); }
-.provider-choice__logo[data-provider="baidu"] { background: linear-gradient(135deg, #315efb, #7657ff); }
 .provider-choice__copy, .provider-selected > div { min-width: 0; }
 .provider-choice__copy strong, .provider-choice__copy small, .provider-selected strong, .provider-selected small { display: block; }
 .provider-choice__copy strong, .provider-selected strong { color: #1d2939; font-size: 14px; }
@@ -772,8 +912,7 @@ onUnmounted(stopQrPolling)
   .connection-banner { align-items: flex-start; }
   .connection-banner .el-button { display: none; }
   .provider-picker { grid-template-columns: 1fr; }
-  .provider-choice { grid-template-columns: 42px minmax(0, 1fr) auto 16px; }
-  .provider-choice__logo { width: 42px; height: 42px; }
+  .provider-choice { grid-template-columns: 46px minmax(0, 1fr) auto 16px; }
   .authorization-section { padding: 13px; }
   .authorization-heading { grid-template-columns: 26px minmax(0, 1fr) auto; }
   .authorization-number { width: 26px; height: 26px; }
@@ -786,5 +925,9 @@ onUnmounted(stopQrPolling)
   .account-facts > div:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   .account-actions { flex-wrap: wrap; }
   .account-actions .el-button { flex: 1; }
+  .openapi-coverage { grid-template-columns: 1fr; }
+  .openapi-coverage > .app-icon { display: none; }
+  .open-mode-grid { grid-template-columns: 1fr; }
+  .openapi-form { padding-left: 0; }
 }
 </style>
