@@ -59,8 +59,14 @@ async def test_baidu_open_provider_refreshes_and_lists_account_drive() -> None:
 
 async def test_baidu_private_provider_lists_share_root() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "tieba.baidu.com":
-            return httpx.Response(200, json={"data": {"user_id": 12, "user_name": "Baidu"}})
+        if request.url.path == "/api/gettemplatevariable":
+            return httpx.Response(
+                200,
+                json={
+                    "errno": 0,
+                    "result": {"uk": 12, "username": "Baidu", "loginstate": 1},
+                },
+            )
         return httpx.Response(
             200,
             json={

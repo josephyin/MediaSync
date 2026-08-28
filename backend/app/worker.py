@@ -16,6 +16,7 @@ from app.core.execution import (
     BackgroundExecutionModeError,
     require_background_execution_mode,
 )
+from app.core.logging import suppress_sensitive_http_client_logs
 from app.core.process import install_shutdown_signal_handlers
 from app.task_engine.handlers import TaskHandlerRegistry
 from app.task_engine.scan_handler import ScanTaskHandler
@@ -186,6 +187,7 @@ def main() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    suppress_sensitive_http_client_logs()
     try:
         asyncio.run(run_worker(settings=settings))
     except BackgroundExecutionModeError as exc:

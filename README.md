@@ -13,10 +13,11 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ✅ 阿里云盘（MVP Provider；私有接口实验模式）
 - ✅ 夸克网盘（Cookie 私有接口，实验性）
 - ✅ 123 云盘（Access Token 私有接口，实验性）
+- ✅ 百度网盘（BDUSS + OpenList OpenAPI 双凭证，实验性）
 - ⬜ 115
 - ⬜ OneDrive
 
-> 当前候选版本为 `v0.2.0-rc.29`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘、夸克网盘、123 云盘和百度网盘 Web 私有接口可能随上游更新或账号风控失效。
+> 当前候选版本为 `v0.2.0-rc.30`。普通用户可以用一个容器直接运行，并可在系统设置中使用实验性一键更新；API、Scheduler、Worker 和 Nginx 在容器内仍是职责独立的进程。阿里云盘、夸克网盘、123 云盘和百度网盘 Web 私有接口可能随上游更新或账号风控失效。
 
 ## MVP 功能
 
@@ -51,7 +52,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.29
+  josephyjq/mediasync:v0.2.0-rc.30
 ```
 
 访问 `http://NAS_IP:9090`，默认管理员用户名和密码均为 `admin`。首次登录后
@@ -69,7 +70,7 @@ docker run -d \
   -e ADMIN_PASSWORD='你的强密码' \
   --restart unless-stopped \
   --stop-timeout 120 \
-  josephyjq/mediasync:v0.2.0-rc.29
+  josephyjq/mediasync:v0.2.0-rc.30
 ```
 
 数据库和运行时密钥都保存在宿主机映射的 `/你的路径/mediasync` 中，备份和恢复时
@@ -97,7 +98,7 @@ SECRET_KEY=一个足够长的随机字符串
 CREDENTIAL_ENCRYPTION_KEY=另一个足够长的随机字符串
 ADMIN_PASSWORD=强密码
 MEDIASYNC_IMAGE=ghcr.io/josephyin/mediasync
-MEDIASYNC_IMAGE_TAG=v0.2.0-rc.29
+MEDIASYNC_IMAGE_TAG=v0.2.0-rc.30
 ```
 
 ```bash
@@ -147,7 +148,7 @@ docker-compose.yml
 ## 安全说明
 
 - 私有/Open refresh token、Open Client Secret 和分享密码使用 `CREDENTIAL_ENCRYPTION_KEY` 加密后存入 SQLite。
-- 私有接口模式支持在 MediaSync 本机生成阿里云盘登录二维码；扫码确认后 token 由后端直接加密保存，不经过第三方取 token 服务。
+- 私有接口模式支持在 MediaSync 本机生成阿里云盘、123 云盘和百度网盘登录二维码；扫码确认后凭证由后端直接加密保存，不经过 MediaSync 官方取 token 服务。
 - 管理 API 使用签名的 HttpOnly Cookie；公网部署必须在反向代理层启用 HTTPS。
 - Appliance 默认使用局域网 HTTP Cookie；HTTPS 部署必须设置 `SESSION_COOKIE_SECURE=true`。
 - 不要提交 `.env`、数据库、日志或真实第三方凭证。
@@ -227,7 +228,8 @@ MediaSync 使用目录检查点降低日常扫描的请求量：
 - [x] 发布 `v0.2.0-rc.26` 123 云盘实验性候选版
 - [x] 发布 `v0.2.0-rc.27` 123 云盘根目录修复候选版
 - [x] 发布 `v0.2.0-rc.28` 123 云盘嵌套文件转存修复候选版
-- [ ] 发布 `v0.2.0-rc.29` 百度网盘实验性 Provider 候选版
+- [x] 发布 `v0.2.0-rc.29` 百度网盘实验性 Provider 候选版
+- [ ] 发布 `v0.2.0-rc.30` 简化账号授权与扫码登录候选版
 - [ ] 发布 `v0.2.0` 正式版
 - [x] 夸克网盘私有 Q2 只读适配
 - [x] 夸克网盘 OpenList OpenAPI 双凭证适配（待真实凭证验收）

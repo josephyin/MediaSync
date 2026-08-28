@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.exceptions import MediaSyncError
+from app.core.logging import suppress_sensitive_http_client_logs
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.update_execution_gate import build_update_execution_gate
 
@@ -17,6 +18,7 @@ logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+suppress_sensitive_http_client_logs()
 logger = logging.getLogger(__name__)
 
 

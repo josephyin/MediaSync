@@ -107,9 +107,9 @@ class BaiduPrivateProvider:
             data = await probe.fetch_account()
         finally:
             await self._finish(probe)
-        user_id = str(data.get("user_id") or "")
+        user_id = str(data.get("uk") or "")
         return AccountProfile(
-            identity=str(data.get("user_name") or data.get("name") or user_id or "Baidu"),
+            identity=str(data.get("username") or user_id or "Baidu"),
             user_id=user_id or None,
             default_drive_id=ROOT_FOLDER_ID,
             drives=[DriveRef(ROOT_FOLDER_ID, "default", "默认盘")],

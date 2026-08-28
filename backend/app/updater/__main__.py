@@ -7,6 +7,7 @@ import socket
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.core.logging import suppress_sensitive_http_client_logs
 from app.services.docker_capability_service import DockerEngineClient
 from app.services.update_snapshot_service import (
     UpdaterResultJournal,
@@ -111,6 +112,7 @@ def main() -> int:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    suppress_sensitive_http_client_logs()
     try:
         return asyncio.run(run())
     except Exception:
