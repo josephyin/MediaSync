@@ -25,30 +25,43 @@ from app.providers.base import (
 )
 
 DEFAULT_OPENLIST_TOKEN_URL = "https://api.oplist.org/baiduyun/renewapi"
+DEFAULT_ALISTGO_CLIENT_ID = "hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf"
+DEFAULT_ALISTGO_CLIENT_SECRET = "YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE"
+BAIDU_OAUTH_TOKEN_URL = "https://openapi.baidu.com/oauth/2.0/token"
 ROOT_FOLDER_ID = "/"
 
 
 class BaiduOpenProvider:
-    """Baidu account-drive adapter using an OpenList refresh-token broker."""
+    """Baidu account-drive adapter using hosted or direct OAuth refresh."""
 
     def __init__(
         self,
         refresh_token: str,
         *,
-        oauth_token_url: str = DEFAULT_OPENLIST_TOKEN_URL,
+        oauth_token_url: str | None = DEFAULT_OPENLIST_TOKEN_URL,
+        client_id: str = "",
+        client_secret: str = "",
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.refresh_token = refresh_token.strip()
-        self.oauth_token_url = oauth_token_url.strip()
+        self.oauth_token_url = oauth_token_url.strip() if oauth_token_url else None
+        self.client_id = client_id.strip()
+        self.client_secret = client_secret.strip()
         self._http_client = http_client
         self._access_token: str | None = None
         self._refresh_token_update: str | None = None
         self.request_count = 0
 
     def _require_configuration(self) -> None:
-        parsed = urlparse(self.oauth_token_url)
         if not self.refresh_token:
             raise ProviderNotConfiguredError("Baidu OpenAPI refresh token is required")
+        if self.oauth_token_url is None:
+            if not self.client_id or not self.client_secret:
+                raise ProviderNotConfiguredError(
+                    "Baidu OpenAPI Client ID and Client Secret are required"
+                )
+            return
+        parsed = urlparse(self.oauth_token_url)
         if (
             parsed.scheme != "https"
             or not parsed.hostname
@@ -69,31 +82,40 @@ class BaiduOpenProvider:
         client = self._http_client or httpx.AsyncClient(timeout=20)
         try:
             self.request_count += 1
-            response = await client.get(
-                self.oauth_token_url,
-                params={
-                    "refresh_ui": self.refresh_token,
-                    "server_use": "true",
-                    "driver_txt": "baiduyun_go",
-                },
-            )
+            if self.oauth_token_url:
+                response = await client.get(
+                    self.oauth_token_url,
+                    params={
+                        "refresh_ui": self.refresh_token,
+                        "server_use": "true",
+                        "driver_txt": "baiduyun_go",
+                    },
+                )
+            else:
+                response = await client.get(
+                    BAIDU_OAUTH_TOKEN_URL,
+                    params={
+                        "grant_type": "refresh_token",
+                        "refresh_token": self.refresh_token,
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret,
+                    },
+                )
         except httpx.HTTPError as exc:
-            raise ProviderRequestError("Baidu OpenList token refresh request failed") from exc
+            raise ProviderRequestError("Baidu OpenAPI token refresh request failed") from exc
         finally:
             if owns_client:
                 await client.aclose()
         try:
             payload = response.json()
         except ValueError as exc:
-            raise ProviderRequestError(
-                "Baidu OpenList token refresh returned invalid JSON"
-            ) from exc
+            raise ProviderRequestError("Baidu OpenAPI token refresh returned invalid JSON") from exc
         if not isinstance(payload, dict):
-            raise ProviderRequestError("Baidu OpenList token refresh returned invalid data")
+            raise ProviderRequestError("Baidu OpenAPI token refresh returned invalid data")
         access_token = str(payload.get("access_token") or "")
         rotated = str(payload.get("refresh_token") or "")
         if response.is_error or not access_token or not rotated:
-            raise ProviderRequestError("Baidu OpenList token refresh failed")
+            raise ProviderRequestError("Baidu OpenAPI token refresh failed")
         self._access_token = access_token
         if rotated != self.refresh_token:
             self.refresh_token = rotated

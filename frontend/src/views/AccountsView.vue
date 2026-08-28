@@ -36,6 +36,7 @@ interface GuidedLoginOption {
   privatePurpose: string
   openApi: OpenApiRequirement
   openApiPurpose?: string
+  openApiModes?: string
 }
 
 const guidedLoginOptions: Record<string, GuidedLoginOption> = {
@@ -49,6 +50,7 @@ const guidedLoginOptions: Record<string, GuidedLoginOption> = {
     privatePurpose: '读取分享并执行转存',
     openApi: 'optional',
     openApiPurpose: '识别默认盘、资源库与备份盘',
+    openApiModes: 'AListGo、OpenList 或自有应用',
   },
   quark: {
     provider: 'quark',
@@ -60,6 +62,7 @@ const guidedLoginOptions: Record<string, GuidedLoginOption> = {
     privatePurpose: '读取分享、浏览账号盘、查重、建目录并执行转存',
     openApi: 'optional',
     openApiPurpose: '备用的官方账号盘访问通道',
+    openApiModes: 'OpenList（需要 AppID 和 SignKey）',
   },
   pan123: {
     provider: 'pan123',
@@ -69,7 +72,9 @@ const guidedLoginOptions: Record<string, GuidedLoginOption> = {
     state: 'available',
     icon: 'scan',
     privatePurpose: '读取分享、浏览账号盘并执行转存',
-    openApi: 'none',
+    openApi: 'optional',
+    openApiPurpose: '使用官方账号盘接口浏览目录和创建文件夹',
+    openApiModes: 'OpenList 或自有开放平台应用',
   },
   baidu: {
     provider: 'baidu',
@@ -81,6 +86,7 @@ const guidedLoginOptions: Record<string, GuidedLoginOption> = {
     privatePurpose: '读取分享并执行转存',
     openApi: 'required',
     openApiPurpose: '浏览账号盘、查重并自动创建目录',
+    openApiModes: 'AListGo、OpenList 或自有应用',
   },
 }
 
@@ -93,6 +99,7 @@ const aliyunHostedTokenUrls = {
 } as const
 const quarkOpenListTokenUrl = 'https://api.oplist.org/quarkyun/renewapi'
 const baiduOpenListTokenUrl = 'https://api.oplist.org/baiduyun/renewapi'
+const pan123OpenListTokenUrl = 'https://api.oplist.org/123cloud/renewapi'
 const openForm = reactive({
   mode: 'alistgo' as 'alistgo' | 'openlist' | 'custom',
   refresh_token: '',
@@ -124,6 +131,18 @@ const selectedAuthorizationSummary = computed(() => {
 })
 const qrProviderLabel = computed(() => providerName(providers.value, qrProviderId.value))
 const openListAuthorizationPage = computed(() => openForm.token_url.includes('api-cn.oplist.org') ? 'https://api-cn.oplist.org' : 'https://api.oplist.org')
+const availableOpenModes = computed(() => {
+  if (openAccount.value?.provider === 'quark') return [{ value: 'openlist', label: 'OpenList APIPages' }]
+  if (openAccount.value?.provider === 'pan123') return [
+    { value: 'openlist', label: 'OpenList APIPages' },
+    { value: 'custom', label: '自有 OpenAPI 应用' },
+  ]
+  return [
+    { value: 'alistgo', label: 'AListGo 授权' },
+    { value: 'openlist', label: 'OpenList APIPages' },
+    { value: 'custom', label: '自有 OpenAPI 应用' },
+  ]
+})
 const qrAppLabel = computed(() => {
   if (qrProviderId.value === 'quark') return '夸克 App'
   if (qrProviderId.value === 'pan123') return '微信或 123 云盘 App'
@@ -147,16 +166,18 @@ function authorizationCountLabel(providerId: string) {
 
 function providerInfo(providerId: string) { return findProvider(providers.value, providerId) }
 function supportsQrLogin(account: CloudAccount) { return ['aliyundrive', 'quark', 'pan123', 'baidu'].includes(account.provider) }
-function supportsOpenApi(account: CloudAccount) { return ['aliyundrive', 'quark', 'baidu'].includes(account.provider) }
+function supportsOpenApi(account: CloudAccount) { return ['aliyundrive', 'quark', 'pan123', 'baidu'].includes(account.provider) }
 function openProviderName(account: CloudAccount | null) {
   return account ? `${providerName(providers.value, account.provider)} OpenAPI` : 'OpenAPI'
 }
 function defaultOpenMode(account: CloudAccount) {
-  return ['quark', 'baidu'].includes(account.provider) ? 'openlist' : 'alistgo'
+  if (['quark', 'pan123'].includes(account.provider)) return 'openlist'
+  return 'alistgo'
 }
 function defaultOpenTokenUrl(account: CloudAccount, mode: 'alistgo' | 'openlist' | 'custom') {
   if (account.provider === 'quark') return quarkOpenListTokenUrl
-  if (account.provider === 'baidu') return baiduOpenListTokenUrl
+  if (account.provider === 'pan123') return mode === 'openlist' ? pan123OpenListTokenUrl : ''
+  if (account.provider === 'baidu') return mode === 'openlist' ? baiduOpenListTokenUrl : ''
   return mode === 'custom' ? '' : aliyunHostedTokenUrls[mode]
 }
 const accountCredentialLabel = computed(() => {
@@ -273,7 +294,7 @@ function openOpenApi(account: CloudAccount) {
   openDialog.value = true
 }
 function openModeChanged(mode: 'alistgo' | 'openlist' | 'custom') {
-  if (openAccount.value && mode !== 'custom') {
+  if (openAccount.value) {
     openForm.token_url = defaultOpenTokenUrl(openAccount.value, mode)
   }
 }
@@ -284,7 +305,7 @@ async function saveOpenApi() {
   try {
     const body: Record<string, string> = { mode: openForm.mode }
     if (openForm.refresh_token.trim()) body.refresh_token = openForm.refresh_token.trim()
-    if (openForm.mode !== 'custom') body.token_url = openForm.token_url.trim()
+    if (openForm.mode !== 'custom' && openForm.token_url.trim()) body.token_url = openForm.token_url.trim()
     if (openForm.mode === 'custom' || openAccount.value.provider === 'quark') {
       if (openForm.client_id.trim()) body.client_id = openForm.client_id.trim()
       if (openForm.client_secret.trim()) body.client_secret = openForm.client_secret.trim()
@@ -384,11 +405,11 @@ async function pollQr() {
       stopQrPolling()
       qrStatus.value = '登录成功，账号已保存'
       await load()
-      const needsRequiredOpenApi = qrProviderId.value === 'baidu' && result.account && !result.account.open_auth_mode
-      ElMessage.success(needsRequiredOpenApi ? `${qrProviderLabel.value}私有登录成功，请继续绑定 OpenAPI` : `${qrProviderLabel.value}登录成功`)
+      const shouldOfferOpenApi = result.account && supportsOpenApi(result.account) && !result.account.open_auth_mode && qrProviderId.value !== 'quark'
+      ElMessage.success(shouldOfferOpenApi ? `${qrProviderLabel.value}私有登录成功，请选择 OpenAPI 授权方式` : `${qrProviderLabel.value}登录成功`)
       window.setTimeout(() => {
         qrDialog.value = false
-        if (needsRequiredOpenApi && result.account) openOpenApi(result.account)
+        if (shouldOfferOpenApi && result.account) openOpenApi(result.account)
       }, 600)
     }
   } catch (error) {
@@ -457,8 +478,11 @@ onUnmounted(stopQrPolling)
         <div v-if="supportsOpenApi(account)" class="open-panel" :class="{ connected: account.open_auth_mode }">
           <div class="open-panel__title">
             <div><span class="open-mark">O</span><div><strong>{{ providerName(providers, account.provider) }} OpenAPI</strong><p>{{ account.open_auth_mode ? `${openModeLabels[account.open_auth_mode]} 授权` : account.provider === 'aliyundrive' ? '可选，用于识别默认盘、资源库与备份盘' : account.provider === 'quark' ? '可选；Cookie 已覆盖浏览、查重、建目录和转存' : '用于账号盘浏览、查重和目录能力' }}</p></div></div>
-            <el-tag v-if="account.open_status" size="small" :type="statusType(account.open_status)">{{ statusLabel(account.open_status) }}</el-tag>
-            <span v-else class="muted">未绑定</span>
+            <div class="open-panel__action">
+              <el-tag v-if="account.open_status" size="small" :type="statusType(account.open_status)">{{ statusLabel(account.open_status) }}</el-tag>
+              <span v-else class="muted">未绑定</span>
+              <el-button text type="primary" size="small" @click="openOpenApi(account)">{{ account.open_auth_mode ? '编辑' : '选择授权方式' }}</el-button>
+            </div>
           </div>
           <p v-if="account.open_account_identity" class="open-identity">{{ account.open_account_identity }}</p>
           <p v-if="account.last_error || account.open_last_error" class="account-error">{{ account.open_last_error || account.last_error }}</p>
@@ -539,7 +563,7 @@ onUnmounted(stopQrPolling)
             <div><strong>OpenAPI 授权</strong><small>{{ selectedGuidedOption?.openApiPurpose }}</small></div>
             <el-tag size="small" :type="selectedGuidedOption?.openApi === 'required' ? 'danger' : 'info'" effect="plain">{{ selectedGuidedOption?.openApi === 'required' ? '必需' : '可选' }}</el-tag>
           </div>
-          <div class="authorization-wait"><AppIcon name="lock" :size="16" /><span>先完成私有登录，账号创建后继续授权</span></div>
+          <div class="authorization-wait"><AppIcon name="lock" :size="16" /><span>先完成私有登录，账号创建后选择授权方式<span v-if="selectedGuidedOption?.openApiModes">：{{ selectedGuidedOption.openApiModes }}</span></span></div>
         </div>
 
         <div class="privacy-note"><AppIcon name="shield" :size="16" /><span>登录凭证只保存在你的 MediaSync 中，不会发送到 MediaSync 官方服务器。</span></div>
@@ -572,17 +596,23 @@ onUnmounted(stopQrPolling)
     <el-dialog v-model="openDialog" :title="`绑定 ${openProviderName(openAccount)}`" width="min(560px, calc(100vw - 32px))">
       <el-alert v-if="openAccount?.provider === 'aliyundrive'" title="私有 token 继续负责分享监控和转存；Open token 只用于识别默认盘、资源库和备份盘。校验时会核对两边是否为同一账号。" type="info" :closable="false" class="open-alert" />
       <el-alert v-else-if="openAccount?.provider === 'quark'" title="此项为可选增强。夸克 Cookie 已覆盖分享读取、账号盘浏览、查重、自动建目录和转存；没有匹配的 OpenAPI AppID/SignKey 时直接跳过，不影响正常使用。" type="info" :closable="false" class="open-alert" />
-      <el-alert v-else title="BDUSS Cookie 负责分享读取和转存；OpenList Open token 负责账号盘浏览、查重和自动建目录。系统会校验两套凭证是否属于同一百度账号。" type="info" :closable="false" class="open-alert" />
+      <el-alert v-else-if="openAccount?.provider === 'pan123'" title="扫码登录已覆盖分享读取和转存；OpenAPI 是可选的官方账号盘通道，用于目录浏览和建目录。AListGo 的 123 token 无法在外部长期续期，因此这里只提供 OpenList 和自有应用。" type="info" :closable="false" class="open-alert" />
+      <el-alert v-else title="BDUSS Cookie 负责分享读取和转存；OpenAPI 负责账号盘浏览、查重和自动建目录。系统会校验两套凭证是否属于同一百度账号。" type="info" :closable="false" class="open-alert" />
       <el-form label-position="top">
-        <el-form-item v-if="openAccount?.provider === 'aliyundrive'" label="授权方式">
+        <el-form-item label="授权方式">
           <el-radio-group v-model="openForm.mode" @change="openModeChanged">
-            <el-radio value="alistgo">AListGo 托管刷新</el-radio>
-            <el-radio value="openlist">OpenList APIPages</el-radio>
-            <el-radio value="custom">自有 OpenAPI 应用</el-radio>
+            <el-radio v-for="mode in availableOpenModes" :key="mode.value" :value="mode.value">{{ mode.label }}</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-else label="授权方式"><el-tag>OpenList APIPages</el-tag></el-form-item>
-        <el-alert v-if="openForm.mode !== 'custom'" title="托管模式会把 Open refresh token 发送到下面的 Token URL。不同服务签发的 token 不能混用，请只使用你信任的服务。" type="warning" :closable="false" class="open-alert" />
+        <el-alert v-if="openForm.mode === 'openlist' || (openForm.mode === 'alistgo' && openAccount?.provider === 'aliyundrive')" title="托管模式会把 Open refresh token 发送到下面的 Token URL。不同服务签发的 token 不能混用，请只使用你信任的服务。" type="warning" :closable="false" class="open-alert" />
+        <div v-if="openForm.mode === 'alistgo' && openAccount?.provider === 'baidu'" class="openlist-assistant">
+          <div class="assistant-title"><AppIcon name="browser" :size="18" /><div><strong>AListGo 百度授权助手</strong><span>使用 AListGo 官方公开应用完成授权，MediaSync 使用同一组公开应用参数在本机续期。</span></div></div>
+          <ol>
+            <li><span>1</span><div><el-link href="https://alistgo.com/zh/tool/baidu/request.html" target="_blank" type="primary">打开 AListGo 百度授权工具</el-link>并完成授权。</div></li>
+            <li><span>2</span><div>复制页面中的 Refresh Token，再回到这里读取或粘贴。</div></li>
+          </ol>
+          <el-button plain type="primary" @click="importOpenTokenFromClipboard"><AppIcon name="copy" :size="15" />从剪贴板读取 Refresh Token</el-button>
+        </div>
         <div v-if="openForm.mode === 'openlist' && openAccount?.provider === 'baidu'" class="openlist-assistant">
           <div class="assistant-title"><AppIcon name="browser" :size="18" /><div><strong>OpenList 百度授权助手</strong><span>OpenList 当前不会把授权结果自动回传给 MediaSync，因此还需要一次复制；无需打开开发者工具。</span></div></div>
           <ol>
@@ -593,10 +623,10 @@ onUnmounted(stopQrPolling)
           <el-button plain type="primary" @click="importOpenTokenFromClipboard"><AppIcon name="copy" :size="15" />从剪贴板读取 Refresh Token</el-button>
         </div>
         <el-alert v-else-if="openForm.mode === 'openlist'" type="info" :closable="false" class="open-alert">
-          <template #title>请在 OpenList APIPages 选择“{{ openAccount?.provider === 'quark' ? '夸克网盘 (OAuth2) 验证登录' : openAccount?.provider === 'baidu' ? '百度网盘 验证登录' : '阿里云盘 (OAuth2) 扫码登录' }}”获取专用 token，并在下方选择同一节点：<el-link href="https://api.oplist.org.cn" target="_blank" type="primary">国内站</el-link> · <el-link href="https://api.oplist.org" target="_blank" type="primary">全球站</el-link></template>
+          <template #title>请在 OpenList APIPages 选择“{{ openAccount?.provider === 'quark' ? '夸克网盘 (OAuth2) 验证登录' : openAccount?.provider === 'baidu' ? '百度网盘 验证登录' : openAccount?.provider === 'pan123' ? '123 云盘 Open 验证登录' : '阿里云盘 (OAuth2) 扫码登录' }}”获取专用 token，并在下方选择同一节点：<el-link href="https://api.oplist.org.cn" target="_blank" type="primary">国内站</el-link> · <el-link href="https://api.oplist.org" target="_blank" type="primary">全球站</el-link></template>
         </el-alert>
-        <el-form-item label="Open Refresh Token（编辑时留空表示不修改）"><el-input v-model="openForm.refresh_token" type="password" show-password /></el-form-item>
-        <el-form-item v-if="openForm.mode === 'alistgo'" label="托管 Token URL"><el-input v-model="openForm.token_url" /></el-form-item>
+        <el-form-item v-if="!(openAccount?.provider === 'pan123' && openForm.mode === 'custom')" label="Open Refresh Token（编辑时留空表示不修改）"><el-input v-model="openForm.refresh_token" type="password" show-password /></el-form-item>
+        <el-form-item v-if="openForm.mode === 'alistgo' && openForm.token_url" label="托管 Token URL"><el-input v-model="openForm.token_url" /></el-form-item>
         <el-form-item v-else-if="openForm.mode === 'openlist'" label="OpenList 刷新节点">
           <el-select v-model="openForm.token_url" filterable allow-create default-first-option class="full-width">
             <template v-if="openAccount?.provider === 'quark'">
@@ -606,6 +636,10 @@ onUnmounted(stopQrPolling)
             <template v-else-if="openAccount?.provider === 'baidu'">
               <el-option label="OpenList 全球站" value="https://api.oplist.org/baiduyun/renewapi" />
               <el-option label="OpenList 国内站" value="https://api-cn.oplist.org/baiduyun/renewapi" />
+            </template>
+            <template v-else-if="openAccount?.provider === 'pan123'">
+              <el-option label="OpenList 全球站" value="https://api.oplist.org/123cloud/renewapi" />
+              <el-option label="OpenList 国内站" value="https://api-cn.oplist.org/123cloud/renewapi" />
             </template>
             <template v-else>
               <el-option label="OpenList 国内站" value="https://api.oplist.org.cn/alicloud/renewapi" />
@@ -658,6 +692,7 @@ onUnmounted(stopQrPolling)
 .open-panel { padding: 14px; border: 1px solid var(--border-color); border-radius: 14px; background: #f8fafc; }
 .open-panel.connected { border-color: #d9e9ff; background: #f5f9ff; }
 .open-panel__title { justify-content: space-between; gap: 12px; }
+.open-panel__action { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .open-panel__title > div { gap: 10px; min-width: 0; }
 .open-panel__title strong { display: block; margin-bottom: 2px; font-size: 13px; }
 .open-mark { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 9px; color: #fff; background: #2f80ed; font-size: 12px; font-weight: 800; }
