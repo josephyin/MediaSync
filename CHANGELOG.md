@@ -2,6 +2,27 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.34] - 2026-08-28
+
+这是云盘账号授权体验统一候选版本。各 Provider 的 OpenAPI 绑定页采用同一套信息
+结构，并在账号管理全流程中补齐品牌识别。
+
+### 改进
+
+- OpenAPI 绑定弹窗统一为“能力说明、授权来源、获取凭证、保存校验”的分段流程，
+  同时保留阿里云盘、夸克、123 云盘和百度网盘各自真实可用的授权方式与限制。
+- 私有登录与 OpenAPI 的必需、可选关系在添加向导和绑定弹窗中明确展示，避免把
+  Cookie、扫码登录与开放平台凭证误认为相互替代。
+- 账号卡片、添加向导、OpenAPI 状态区和绑定弹窗统一显示四个网盘的品牌 Logo；
+  图标使用本地静态资源，不依赖运行时访问外部站点。
+
+### 验证
+
+- 完整后端测试 777 项、Ruff、全新数据库迁移往返、前端 5 项测试和生产构建通过。
+- 账号列表、添加向导与 OpenAPI 弹窗已完成桌面端和 390px 手机端浏览器检查，
+  控制台无警告或错误。
+- 本版本没有数据库迁移，也不改变 Provider 转存协议和已保存凭证格式。
+
 ## [0.2.0-rc.33] - 2026-08-28
 
 这是授权入口现场修复候选版本。rc.32 的离线协议测试通过，但真实页面验收发现
@@ -884,6 +905,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.34]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.34
 [0.2.0-rc.33]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.33
 [0.2.0-rc.32]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.32
 [0.2.0-rc.31]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.31
