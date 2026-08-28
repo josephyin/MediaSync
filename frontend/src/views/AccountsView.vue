@@ -4,8 +4,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Page } from '../api/client'
 import type { CloudAccount, ProviderInfo, SystemInfo } from '../api/types'
 import AppIcon from '../components/AppIcon.vue'
+import ProviderLogo from '../components/ProviderLogo.vue'
 import { formatDateTime, formatRelativeTime, openModeLabels, statusLabel, statusType } from '../utils/display'
-import { findProvider, providerAvailabilityLabel, providerMark, providerName, supportsCapabilities } from '../utils/providers'
+import { findProvider, providerAvailabilityLabel, providerName, supportsCapabilities } from '../utils/providers'
 
 interface QrStart { session_id: string; qr_code_data_url: string; expires_in: number }
 interface QrStatus { status: 'waiting' | 'scanned' | 'confirmed' | 'expired'; account?: CloudAccount }
@@ -544,7 +545,7 @@ onUnmounted(stopQrPolling)
     <div v-loading="pageLoading" class="account-grid">
       <article v-for="account in accounts" :key="account.id" class="account-card">
         <header class="account-card__header">
-          <div class="account-brand"><span class="account-logo">{{ providerMark(providers, account.provider) }}</span><div><h3>{{ account.name }}</h3><p>{{ account.account_identity || '账号信息待校验' }}</p></div></div>
+          <div class="account-brand"><ProviderLogo class="account-logo" :provider="account.provider" :size="42" /><div><h3>{{ account.name }}</h3><p>{{ account.account_identity || '账号信息待校验' }}</p></div></div>
           <el-tag :type="statusType(account.status)" effect="light">{{ statusLabel(account.status) }}</el-tag>
         </header>
 
@@ -556,7 +557,7 @@ onUnmounted(stopQrPolling)
 
         <div v-if="supportsOpenApi(account)" class="open-panel" :class="{ connected: account.open_auth_mode }">
           <div class="open-panel__title">
-            <div><span class="open-mark">O</span><div><strong>{{ providerName(providers, account.provider) }} OpenAPI</strong><p>{{ account.provider === 'pan123' && account.open_auth_mode === 'openlist' ? '公共 OpenList 已停用，请改用自有应用或解绑' : account.open_auth_mode ? `${openModeLabels[account.open_auth_mode]} 授权` : account.provider === 'aliyundrive' ? '可选，用于识别默认盘、资源库与备份盘' : account.provider === 'quark' ? '可选；Cookie 已覆盖浏览、查重、建目录和转存' : '用于账号盘浏览、查重和目录能力' }}</p></div></div>
+            <div><ProviderLogo :provider="account.provider" :size="30" /><div><strong>{{ providerName(providers, account.provider) }} OpenAPI</strong><p>{{ account.provider === 'pan123' && account.open_auth_mode === 'openlist' ? '公共 OpenList 已停用，请改用自有应用或解绑' : account.open_auth_mode ? `${openModeLabels[account.open_auth_mode]} 授权` : account.provider === 'aliyundrive' ? '可选，用于识别默认盘、资源库与备份盘' : account.provider === 'quark' ? '可选；Cookie 已覆盖浏览、查重、建目录和转存' : '用于账号盘浏览、查重和目录能力' }}</p></div></div>
             <div class="open-panel__action">
               <el-tag v-if="account.open_status" size="small" :type="statusType(account.open_status)">{{ statusLabel(account.open_status) }}</el-tag>
               <span v-else class="muted">未绑定</span>
@@ -602,7 +603,7 @@ onUnmounted(stopQrPolling)
 
       <div v-if="addStep === 1" class="provider-picker">
         <button v-for="provider in enabledProviders" :key="provider.id" class="provider-choice" type="button" @click="selectProvider(provider.id)">
-          <span class="provider-choice__logo" :data-provider="provider.id">{{ providerMark(providers, provider.id) }}</span>
+          <ProviderLogo class="provider-choice__logo" :provider="provider.id" :size="46" />
           <span class="provider-choice__copy"><strong>{{ provider.name }}</strong><small>{{ authorizationSummary(provider.id) }}</small></span>
           <span class="auth-count" :class="{ double: guidedLoginOptions[provider.id]?.openApi !== 'none' }">{{ authorizationCountLabel(provider.id) }}</span>
           <AppIcon name="arrow" :size="17" />
@@ -611,7 +612,7 @@ onUnmounted(stopQrPolling)
 
       <div v-else class="login-methods">
         <div class="provider-selected">
-          <span class="provider-choice__logo" :data-provider="selectedProviderId">{{ providerMark(providers, selectedProviderId) }}</span>
+          <ProviderLogo class="provider-choice__logo" :provider="selectedProviderId" :size="46" />
           <div><strong>{{ selectedProvider?.name }}</strong><small>{{ selectedAuthorizationSummary }}</small></div>
         </div>
 
@@ -675,7 +676,7 @@ onUnmounted(stopQrPolling)
     <el-dialog v-model="openDialog" :title="`绑定 ${openProviderName(openAccount)}`" width="min(680px, calc(100vw - 32px))" class="openapi-dialog">
       <div class="openapi-overview">
         <div class="openapi-overview__heading">
-          <span class="open-mark">O</span>
+          <ProviderLogo :provider="openAccount?.provider ?? ''" :size="34" />
           <div><strong>{{ openProviderName(openAccount) }}</strong><span>{{ openProviderGuide.verification }}</span></div>
           <el-tag size="small" :type="openProviderGuide.tagType" effect="plain">{{ openProviderGuide.requirement }}</el-tag>
         </div>
@@ -783,7 +784,6 @@ onUnmounted(stopQrPolling)
 .account-card__header, .account-brand, .open-panel__title, .open-panel__title > div, .account-actions { display: flex; align-items: center; }
 .account-card__header { justify-content: space-between; gap: 16px; }
 .account-brand { gap: 12px; min-width: 0; }
-.account-logo { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: #fff; background: linear-gradient(135deg, #6c5ce7, #2898ff); font-size: 13px; font-weight: 800; box-shadow: 0 8px 18px rgb(78 92 224 / 24%); }
 .account-brand h3 { margin: 0 0 4px; font-size: 17px; }
 .account-brand p, .open-panel p { margin: 0; color: var(--text-secondary); font-size: 13px; }
 .account-facts { display: grid; grid-template-columns: .8fr 1.35fr 1fr; gap: 12px; }
@@ -797,7 +797,6 @@ onUnmounted(stopQrPolling)
 .open-panel__action { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .open-panel__title > div { gap: 10px; min-width: 0; }
 .open-panel__title strong { display: block; margin-bottom: 2px; font-size: 13px; }
-.open-mark { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 9px; color: #fff; background: #2f80ed; font-size: 12px; font-weight: 800; }
 .open-identity { margin-top: 10px !important; padding-top: 10px; border-top: 1px dashed #d8e2ef; }
 .account-error { margin-top: 10px !important; color: var(--danger) !important; line-height: 1.5; }
 .account-actions { margin-top: auto; gap: 8px; padding-top: 2px; border-top: 1px solid #f0f2f5; }
@@ -815,7 +814,6 @@ onUnmounted(stopQrPolling)
 .openapi-overview__heading strong, .openapi-overview__heading span { display: block; }
 .openapi-overview__heading strong { color: #1d2939; font-size: 14px; }
 .openapi-overview__heading span { margin-top: 3px; color: #667085; font-size: 11px; line-height: 1.5; }
-.openapi-overview .open-mark { width: 34px; height: 34px; }
 .openapi-coverage { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); align-items: center; gap: 8px; }
 .openapi-coverage > div { min-width: 0; padding: 10px 12px; border-radius: 10px; background: rgb(255 255 255 / 82%); }
 .openapi-coverage span, .openapi-coverage strong { display: block; }
@@ -872,10 +870,6 @@ onUnmounted(stopQrPolling)
 .provider-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 4px 0 8px; }
 .provider-choice { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto 18px; align-items: center; gap: 12px; min-height: 78px; padding: 14px; text-align: left; cursor: pointer; color: #344054; border: 1px solid #e4e7ec; border-radius: 14px; background: #fff; transition: .18s ease; }
 .provider-choice:hover { border-color: #a5b4fc; box-shadow: 0 9px 24px rgba(79,70,229,.08); transform: translateY(-1px); }
-.provider-choice__logo { display: grid; place-items: center; width: 46px; height: 46px; color: #fff; border-radius: 13px; background: linear-gradient(135deg, #6c5ce7, #2898ff); font-size: 12px; font-weight: 800; }
-.provider-choice__logo[data-provider="quark"] { background: linear-gradient(135deg, #ff6a00, #ff9b31); }
-.provider-choice__logo[data-provider="pan123"] { background: linear-gradient(135deg, #1687ff, #15b5ff); }
-.provider-choice__logo[data-provider="baidu"] { background: linear-gradient(135deg, #315efb, #7657ff); }
 .provider-choice__copy, .provider-selected > div { min-width: 0; }
 .provider-choice__copy strong, .provider-choice__copy small, .provider-selected strong, .provider-selected small { display: block; }
 .provider-choice__copy strong, .provider-selected strong { color: #1d2939; font-size: 14px; }
@@ -918,8 +912,7 @@ onUnmounted(stopQrPolling)
   .connection-banner { align-items: flex-start; }
   .connection-banner .el-button { display: none; }
   .provider-picker { grid-template-columns: 1fr; }
-  .provider-choice { grid-template-columns: 42px minmax(0, 1fr) auto 16px; }
-  .provider-choice__logo { width: 42px; height: 42px; }
+  .provider-choice { grid-template-columns: 46px minmax(0, 1fr) auto 16px; }
   .authorization-section { padding: 13px; }
   .authorization-heading { grid-template-columns: 26px minmax(0, 1fr) auto; }
   .authorization-number { width: 26px; height: 26px; }
