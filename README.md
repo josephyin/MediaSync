@@ -11,7 +11,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 ## 云盘服务支持
 
 - ✅ 阿里云盘（MVP Provider；私有接口实验模式）
-- ✅ 夸克网盘（扫码 Cookie + OpenList OpenAPI 双凭证，实验性）
+- ✅ 夸克网盘（扫码 Cookie 覆盖完整转存；OpenAPI 可选，实验性）
 - ✅ 123 云盘（Access Token 私有接口，实验性）
 - ✅ 百度网盘（BDUSS + OpenList OpenAPI 双凭证，实验性）
 - ⬜ 115
