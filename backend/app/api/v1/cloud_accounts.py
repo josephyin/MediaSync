@@ -45,6 +45,12 @@ baidu_qr_login = BaiduQrLogin()
 quark_qr_login = QuarkQrLogin()
 
 
+def _has_usable_open_credential(account: CloudAccount) -> bool:
+    if not account.open_auth_mode:
+        return False
+    return not (account.provider == "pan123" and account.open_auth_mode != "custom")
+
+
 def _get_account(db: DbSession, account_id: int) -> CloudAccount:
     account = db.get(CloudAccount, account_id)
     if account is None:
@@ -423,7 +429,7 @@ async def list_drives(account_id: int, db: DbSession, _: AdminUser) -> list[Driv
         private_profile = await provider.validate_account()
         account.provider_user_id = private_profile.user_id
         profiles = [private_profile]
-        if account.open_auth_mode:
+        if _has_usable_open_credential(account):
             open_provider = get_open_provider(account)
             open_profile = await open_provider.validate_account()
             if (
@@ -469,7 +475,7 @@ async def list_folders(
     drive_id: str | None = None,
 ) -> list[FolderItem]:
     account = _get_account(db, account_id)
-    using_open_provider = bool(account.open_auth_mode)
+    using_open_provider = _has_usable_open_credential(account)
     provider = (
         get_open_provider(account, drive_id)
         if using_open_provider

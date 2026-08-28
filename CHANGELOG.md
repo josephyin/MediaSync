@@ -2,6 +2,28 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0-rc.33] - 2026-08-28
+
+这是授权入口现场修复候选版本。rc.32 的离线协议测试通过，但真实页面验收发现
+123 公共 OpenList OAuth 跳转 404，且百度 AListGo 指向了不存在的请求页面。
+
+### 修复
+
+- 百度 AListGo 改为官方文档当前使用的百度 OAuth 授权地址，授权完成后回到 AListGo
+  callback 页面获取 Refresh Token。
+- 123 普通向导不再提供公共 OpenList 授权。该模式要求 APIPages 节点自行配置企业
+  Client ID、Secret 和回调地址，公共节点缺失或失配时会生成最终返回 404 的跳转。
+- 123 仅保留自有开放平台 Client ID/Secret 高级方式；扫码私有登录继续独立覆盖分享
+  读取、账号盘浏览、建目录和转存，不受本次调整影响。
+- rc.32 已保存但校验失败的 123 OpenList 配置不再接管目标盘和目录读取；账号卡片会
+  提示改用自有应用或解绑，避免升级后影响现有私有接口订阅。
+
+### 验证
+
+- 新增 123 拒绝 AListGo/OpenList 公共托管模式的回归测试，并保留自有应用适配测试。
+- 百度授权入口与 AListGo 官方驱动文档、公开 Client ID/Secret 和 callback 路由重新核对。
+- 完整后端测试 777 项、前端测试 5 项、Ruff 与前端生产构建通过。
+
 ## [0.2.0-rc.32] - 2026-08-28
 
 这是多网盘 OpenAPI 授权矩阵候选版本。账号向导不再把所有网盘强行显示为同一种
@@ -862,6 +884,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0-rc.33]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.33
 [0.2.0-rc.32]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.32
 [0.2.0-rc.31]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.31
 [0.2.0-rc.30]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.30

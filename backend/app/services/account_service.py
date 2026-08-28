@@ -20,9 +20,6 @@ from app.providers.baidu.open_provider import (
 from app.providers.baidu.open_provider import BaiduOpenProvider
 from app.providers.baidu.provider import BaiduProvider
 from app.providers.base import CloudDriveProvider
-from app.providers.pan123.open_provider import (
-    DEFAULT_OPENLIST_TOKEN_URL as DEFAULT_PAN123_OPENLIST_TOKEN_URL,
-)
 from app.providers.pan123.open_provider import Pan123OpenProvider
 from app.providers.quark.open_provider import (
     DEFAULT_OPENLIST_TOKEN_URL as DEFAULT_QUARK_OPENLIST_TOKEN_URL,
@@ -121,9 +118,9 @@ def configure_open_credential(
         raise ValueError("OpenAPI binding is not available for this provider")
     if account.provider == "quark" and payload.mode != "openlist":
         raise ValueError("quark OpenAPI currently requires OpenList mode")
-    if account.provider == "pan123" and payload.mode == "alistgo":
+    if account.provider == "pan123" and payload.mode != "custom":
         raise ValueError(
-            "123 AListGo tokens cannot be renewed outside AListGo; use OpenList or custom mode"
+            "123 OpenAPI only supports a self-owned application; public hosted login is unavailable"
         )
     cipher = get_credential_cipher()
     mode_changed = account.open_auth_mode not in (None, payload.mode)
@@ -145,8 +142,6 @@ def configure_open_credential(
             default_url = DEFAULT_QUARK_OPENLIST_TOKEN_URL
         elif account.provider == "baidu":
             default_url = DEFAULT_BAIDU_OPENLIST_TOKEN_URL
-        elif account.provider == "pan123":
-            default_url = DEFAULT_PAN123_OPENLIST_TOKEN_URL
         else:
             default_url = (
                 DEFAULT_ALISTGO_TOKEN_URL
@@ -241,13 +236,11 @@ def get_open_provider(account: CloudAccount, drive_id: str | None = None) -> Clo
             client_secret=client_secret,
         )
     if account.provider == "pan123":
+        if account.open_auth_mode != "custom":
+            raise ValueError("123 OpenAPI requires a self-owned application")
         if drive_id not in (None, "0", "root"):
             raise ValueError("123 OpenAPI currently exposes only its default drive")
         return Pan123OpenProvider(
-            refresh_token=refresh_token,
-            oauth_token_url=(
-                account.open_token_url if account.open_auth_mode == "openlist" else None
-            ),
             client_id=account.open_client_id or "",
             client_secret=client_secret,
         )
