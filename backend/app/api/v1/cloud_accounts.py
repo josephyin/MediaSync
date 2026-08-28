@@ -11,6 +11,7 @@ from app.providers import get_provider, list_provider_types
 from app.providers.aliyundrive.qr_login import AliyunDriveQrLogin
 from app.providers.baidu.qr_login import BaiduQrLogin
 from app.providers.pan123.qr_login import Pan123QrLogin
+from app.providers.quark.qr_login import QuarkQrLogin
 from app.schemas.cloud_account import (
     CloudAccountCreate,
     CloudAccountRead,
@@ -41,6 +42,7 @@ router = APIRouter(tags=["cloud-accounts"])
 qr_login = AliyunDriveQrLogin(get_settings().aliyundrive_qr_login_base_url)
 pan123_qr_login = Pan123QrLogin()
 baidu_qr_login = BaiduQrLogin()
+quark_qr_login = QuarkQrLogin()
 
 
 def _get_account(db: DbSession, account_id: int) -> CloudAccount:
@@ -303,6 +305,70 @@ async def poll_baidu_qr_login(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     await baidu_qr_login.finish(session_id)
+    return QrLoginStatusResponse(status="confirmed", account=account)
+
+
+@router.post("/quark/qr-login/start", response_model=QrLoginStartResponse)
+async def start_quark_qr_login(
+    payload: QrLoginStartRequest, db: DbSession, _: AdminUser
+) -> QrLoginStartResponse:
+    account = _get_account(db, payload.account_id) if payload.account_id else None
+    if account and account.provider != "quark":
+        raise HTTPException(status_code=422, detail="账号不是 Quark Drive Provider")
+    name = account.name if account else (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="新增账号时必须填写账号名称")
+    try:
+        result = await quark_qr_login.start(
+            account_id=account.id if account else None,
+            account_name=name,
+        )
+    except ProviderRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return QrLoginStartResponse(
+        session_id=result.session_id,
+        qr_code_data_url=result.qr_code_data_url,
+        expires_in=result.expires_in,
+    )
+
+
+@router.get("/quark/qr-login/{session_id}", response_model=QrLoginStatusResponse)
+async def poll_quark_qr_login(
+    session_id: str, db: DbSession, _: AdminUser
+) -> QrLoginStatusResponse:
+    try:
+        login_status, session = await quark_qr_login.poll(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProviderRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if login_status != "confirmed" or not session.cookie:
+        return QrLoginStatusResponse(status=login_status)
+
+    try:
+        if session.account_id:
+            account = _get_account(db, session.account_id)
+            account = update_account(
+                db,
+                account,
+                CloudAccountUpdate(refresh_token=session.cookie),
+            )
+        else:
+            account = create_account(
+                db,
+                CloudAccountCreate(
+                    provider="quark",
+                    name=session.account_name or "Quark Drive",
+                    refresh_token=session.cookie,
+                ),
+            )
+        account = await verify_account(db, account)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="账号名称已经存在") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    await quark_qr_login.finish(session_id)
     return QrLoginStatusResponse(status="confirmed", account=account)
 
 
