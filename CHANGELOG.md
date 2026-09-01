@@ -2,6 +2,19 @@
 
 本项目的重要变更记录在此文件中。版本号遵循语义化版本。
 
+## [0.2.0] - 2026-09-01
+
+这是 MediaSync 首个正式版本。正式版与 rc.34 使用相同的数据库结构、Provider
+协议和运行时行为，本次只收口版本号、发布说明和镜像标签。
+
+### 正式版验收
+
+- rc.34 持续运行正常，阿里云盘、夸克、123 云盘和百度网盘账号流程均可用。
+- 百度嵌套目录分享已完成订阅扫描、自动建目录和文件转存的真实端到端验证。
+- updater 与 NAS 故障恢复演练完成；现有备份、恢复和 rc.17 精确回滚路径继续保留。
+- 完整后端测试、Ruff、迁移往返、前端测试、生产构建和单镜像部署契约通过。
+- GitHub Issue #34 与 #128 完成收口；正式版不新增数据库迁移或实验性功能。
+
 ## [0.2.0-rc.34] - 2026-08-28
 
 这是云盘账号授权体验统一候选版本。各 Provider 的 OpenAPI 绑定页采用同一套信息
@@ -905,6 +918,7 @@ Updater v2 恢复地基。本版本用于 Docker、群晖和飞牛故障演练�
 - 阿里云盘 Web 私有接口属于实验能力，可能因上游接口变化或风控策略失效。
 - Provider SDK v2、多云盘、多用户和 PostgreSQL 不在本版本范围内。
 
+[0.2.0]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0
 [0.2.0-rc.34]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.34
 [0.2.0-rc.33]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.33
 [0.2.0-rc.32]: https://github.com/josephyin/MediaSync/releases/tag/v0.2.0-rc.32
