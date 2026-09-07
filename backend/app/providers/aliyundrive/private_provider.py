@@ -323,7 +323,7 @@ class AliyunDrivePrivateProvider:
             raise ProviderRequestError(f"Aliyun Drive {operation} returned invalid items")
         return RemotePage(
             items=[cls._to_remote_item(item) for item in raw_items if isinstance(item, dict)],
-            next_marker=str(payload.get("next_marker", "")) or None,
+            next_marker=(str(payload.get("next_marker") or "") or None) if raw_items else None,
         )
 
     async def _list_drive_items(self, parent_id: str, marker: str | None = None) -> RemotePage:

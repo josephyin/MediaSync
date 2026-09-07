@@ -9,6 +9,19 @@ from app.providers.quark.provider import QuarkPrivateProvider
 from app.providers.registry import PROVIDERS, list_provider_types
 
 
+@pytest.mark.parametrize("total", [None, 0, 10000, "10000"])
+@pytest.mark.parametrize("page_number", [1, 2])
+def test_empty_page_ignores_stale_total(total, page_number) -> None:
+    page = QuarkPrivateProvider._remote_page(
+        {"data": {"list": []}, "metadata": {"_total": total}},
+        page=page_number,
+        page_size=100,
+        operation="share listing",
+    )
+    assert page.items == []
+    assert page.next_marker is None
+
+
 def make_provider(
     handler, *, page_size: int = 2
 ) -> tuple[QuarkPrivateProvider, httpx.AsyncClient]:

@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -21,6 +22,7 @@ from app.models import (
     TaskRun,
 )
 from app.providers.base import RemoteItem, RemotePage, ShareInfo
+from app.providers.pan123.provider import Pan123PrivateProvider
 from app.task_engine.handlers import (
     TaskExecutionContext,
     TaskHandlerRegistry,
@@ -222,6 +224,89 @@ def task_count(
                 .where(Task.type == task_type)
             )
             or 0
+        )
+
+
+async def test_empty_pan123_share_completes_without_transfers(
+    sessions: sessionmaker[Session],
+) -> None:
+    task_id, subscription_id = seed_scan(sessions)
+    with sessions() as session, session.begin():
+        subscription = session.get(Subscription, subscription_id)
+        subscription.share_url = "https://www.123pan.com/s/share-key"
+        subscription.source_folder_id = "0"
+
+    requests = 0
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        assert requests == 1, "empty share must not request another page"
+        return httpx.Response(
+            200, json={"code": 0, "data": {"InfoList": [], "IsFirst": False, "Next": "-1"}}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        provider = Pan123PrivateProvider("token-value-long-enough", http_client=client)
+        scan_handler = ScanTaskHandler(
+            session_factory=sessions,
+            provider_factory=lambda *_args: provider,
+            token_loader=lambda _account: "token",
+            token_persister=lambda *_args: False,
+        )
+        outcome = await scan_handler(context(task_id=task_id, subscription_id=subscription_id))
+
+    assert outcome.status == "success"
+    assert outcome.metrics["files_discovered"] == 0
+    assert requests == 1
+    assert task_count(sessions, task_type="transfer") == 0
+    with sessions() as session:
+        assert session.get(Subscription, subscription_id).status == "active"
+
+
+@pytest.mark.parametrize("empty_first", [True, False])
+async def test_scan_stops_on_empty_page_with_continuation(sessions, empty_first) -> None:
+    task_id, subscription_id = seed_scan(sessions)
+    pages = {("root", None): RemotePage([], "stale-cursor")}
+    if not empty_first:
+        pages = {
+            ("root", None): RemotePage([file_item("one")], "next"),
+            ("root", "next"): RemotePage([], "stale-cursor"),
+        }
+    provider = FakeScanProvider(pages)
+    outcome = await handler(sessions, provider)(
+        context(task_id=task_id, subscription_id=subscription_id)
+    )
+    assert outcome.status == "success"
+    assert outcome.metrics["files_discovered"] == (0 if empty_first else 1)
+    assert len(provider.calls) == (1 if empty_first else 2)
+
+
+@pytest.mark.parametrize("failure", ["same_cursor", "cursor_cycle", "repeated_items"])
+async def test_scan_fails_when_pagination_makes_no_progress(sessions, failure) -> None:
+    task_id, subscription_id = seed_scan(sessions)
+    pages = {("root", None): RemotePage([file_item("one")], "a")}
+    if failure == "same_cursor":
+        pages[("root", "a")] = RemotePage([file_item("two")], "a")
+    elif failure == "cursor_cycle":
+        pages[("root", "a")] = RemotePage([file_item("two")], "b")
+        pages[("root", "b")] = RemotePage([file_item("three")], "a")
+    else:
+        pages[("root", "a")] = RemotePage([file_item("one")], "b")
+    provider = FakeScanProvider(pages)
+    outcome = await handler(sessions, provider)(
+        context(task_id=task_id, subscription_id=subscription_id)
+    )
+    assert outcome.status == "failed"
+    assert outcome.error_code == "PROVIDER_PAGINATION_STALLED"
+    assert len(provider.calls) == (3 if failure == "cursor_cycle" else 2)
+    with sessions() as session:
+        subscription = session.get(Subscription, subscription_id)
+        assert subscription.status == "error"
+        assert subscription.last_scanned_at is None
+        assert subscription.last_error == "网盘返回重复分页或重复内容，扫描已停止"
+        assert session.scalar(select(func.count()).select_from(CloudFile)) == (
+            2 if failure == "cursor_cycle" else 1
         )
 
 
