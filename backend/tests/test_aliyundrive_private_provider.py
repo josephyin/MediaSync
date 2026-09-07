@@ -1,9 +1,21 @@
 import json
 
 import httpx
+import pytest
 
 from app.providers.aliyundrive.private_provider import AliyunDrivePrivateProvider
 from app.providers.base import FolderRef, RemoteItem
+
+
+@pytest.mark.parametrize("cursor", [None, "", "next-page"])
+@pytest.mark.parametrize("has_items", [False, True])
+def test_listing_normalizes_empty_pages_and_null_cursors(cursor, has_items) -> None:
+    items = [{"file_id": "1", "name": "movie.mkv", "type": "file"}] if has_items else []
+    page = AliyunDrivePrivateProvider._remote_page(
+        {"items": items, "next_marker": cursor}, "share file list"
+    )
+    assert len(page.items) == int(has_items)
+    assert page.next_marker == ((cursor or None) if has_items else None)
 
 
 def make_provider(handler) -> tuple[AliyunDrivePrivateProvider, httpx.AsyncClient]:

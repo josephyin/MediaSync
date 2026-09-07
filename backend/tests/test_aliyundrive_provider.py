@@ -19,6 +19,30 @@ def make_provider(handler) -> tuple[AliyunDriveProvider, httpx.AsyncClient]:
     return provider, client
 
 
+@pytest.mark.parametrize("cursor", [None, "", "next-page"])
+@pytest.mark.parametrize("has_items", [False, True])
+async def test_target_listing_normalizes_empty_pages_and_null_cursors(
+    monkeypatch, cursor, has_items
+) -> None:
+    provider, client = make_provider(lambda _: httpx.Response(500))
+
+    async def drive_id():
+        return "drive-1"
+
+    async def post(*_args):
+        items = [{"file_id": "1", "name": "movie.mkv", "type": "file"}] if has_items else []
+        return {"items": items, "next_marker": cursor}
+
+    monkeypatch.setattr(provider, "_get_drive_id", drive_id)
+    monkeypatch.setattr(provider, "_post", post)
+    try:
+        page = await provider.list_target_items(FolderRef("root", "/"))
+    finally:
+        await client.aclose()
+    assert len(page.items) == int(has_items)
+    assert page.next_marker == ((cursor or None) if has_items else None)
+
+
 async def test_validate_account_refreshes_token_and_reads_drive_info() -> None:
     requests: list[httpx.Request] = []
 

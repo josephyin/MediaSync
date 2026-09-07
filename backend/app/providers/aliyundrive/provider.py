@@ -264,7 +264,7 @@ class AliyunDriveProvider:
             raise ProviderRequestError("Aliyun Drive file list returned an invalid items field")
         return RemotePage(
             items=[self._to_remote_item(item) for item in raw_items if isinstance(item, dict)],
-            next_marker=str(payload.get("next_marker", "")) or None,
+            next_marker=(str(payload.get("next_marker") or "") or None) if raw_items else None,
         )
 
     async def resolve_target_path(self, path: str) -> FolderRef:

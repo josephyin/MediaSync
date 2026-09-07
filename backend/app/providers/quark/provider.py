@@ -168,7 +168,9 @@ class QuarkPrivateProvider:
             if isinstance(raw_total, int) and not isinstance(raw_total, bool)
             else None
         )
-        has_more = page * page_size < total if total is not None else len(raw_items) == page_size
+        has_more = bool(raw_items) and (
+            page * page_size < total if total is not None else len(raw_items) == page_size
+        )
         return RemotePage(
             items=[cls._to_remote_item(item) for item in raw_items],
             next_marker=str(page + 1) if has_more else None,

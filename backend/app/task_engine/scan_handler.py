@@ -10,6 +10,7 @@ from app.core.exceptions import (
     ProviderCapabilityError,
     ProviderError,
     ProviderNotConfiguredError,
+    ProviderPaginationError,
     ProviderRequestError,
 )
 from app.models import CloudAccount, Subscription
@@ -270,6 +271,12 @@ class ScanTaskHandler:
 
     @staticmethod
     def _classify_failure(exc: Exception) -> _FailureDisposition:
+        if isinstance(exc, ProviderPaginationError):
+            return _FailureDisposition(
+                status="failed",
+                error_code=exc.code,
+                safe_message="网盘返回重复分页或重复内容，扫描已停止",
+            )
         if isinstance(exc, ScanSourceNotFoundError):
             return _FailureDisposition(
                 status="failed",

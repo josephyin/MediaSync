@@ -8,6 +8,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.exceptions import ProviderPaginationError
 from app.models import CloudFile, FolderCheckpoint, Subscription, Task
 from app.models.base import utcnow
 from app.providers import get_provider
@@ -161,9 +162,21 @@ async def _scan_folder_contents(
     result = ScanResult(folders_scanned=1)
     child_folders: list[FolderCheckpoint] = []
     marker: str | None = None
+    seen_markers: set[str] = set()
+    seen_item_ids: set[str] = set()
     while True:
         await _raise_if_cancelled(cancellation_requested)
         page = await provider.list_share_items(share, parent_id, marker)
+        if not page.items:
+            break
+        item_ids = {item.remote_file_id for item in page.items}
+        if not item_ids - seen_item_ids:
+            raise ProviderPaginationError("Cloud-drive listing repeated items without progress")
+        if page.next_marker and page.next_marker in seen_markers:
+            raise ProviderPaginationError("Cloud-drive listing repeated a pagination cursor")
+        seen_item_ids.update(item_ids)
+        if page.next_marker:
+            seen_markers.add(page.next_marker)
         for item in page.items:
             relative_path = str(parent_path / item.filename)
             discovered, checkpoint = _record_item(

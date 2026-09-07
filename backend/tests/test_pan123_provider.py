@@ -91,6 +91,38 @@ async def test_resolve_and_paginate_share() -> None:
     assert second.next_marker is None
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"IsFirst": False},
+        {"Next": "-1", "IsFirst": False},
+        {"Next": "2"},
+        {"Total": 100},
+        {"Total": "100", "Next": "2", "IsFirst": False},
+    ],
+)
+@pytest.mark.parametrize("listing", ["share", "target"])
+@pytest.mark.parametrize("marker", [None, "2"])
+async def test_empty_listing_stops_despite_stale_pagination(metadata, listing, marker) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 0, "data": {"InfoList": [], **metadata}})
+
+    provider, client = make_provider(handler)
+    try:
+        if listing == "share":
+            share = await provider.resolve_share("https://www.123pan.com/s/share-key")
+            page = await provider.list_share_items(share, "0", marker)
+        else:
+            page = await provider.list_target_items(FolderRef("0", "/"), marker)
+    finally:
+        await client.aclose()
+
+    assert page.items == []
+    assert page.next_marker is None
+    assert provider.request_count == 1
+
+
 async def test_create_folder_is_verified_by_listing() -> None:
     list_calls = 0
 

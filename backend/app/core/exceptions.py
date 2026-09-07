@@ -22,6 +22,10 @@ class ProviderRequestError(ProviderError):
     code = "PROVIDER_REQUEST_FAILED"
 
 
+class ProviderPaginationError(ProviderError):
+    code = "PROVIDER_PAGINATION_STALLED"
+
+
 class ProviderWriteUncertainError(ProviderRequestError):
     """A write may have reached the provider, so it must not be replayed blindly."""
 

@@ -139,7 +139,9 @@ class Pan123PrivateProvider:
         total_count = total if isinstance(total, int) and not isinstance(total, bool) else None
         next_value = data.get("Next") if isinstance(data, dict) else None
         is_first = data.get("IsFirst") if isinstance(data, dict) else None
-        has_more = (
+        # Empty pages are terminal even when upstream pagination metadata is stale.
+        # In particular, IsFirst=False must not keep an empty share scanning forever.
+        has_more = bool(items) and (
             page * page_size < total_count
             if total_count is not None
             else next_value not in (None, "-1", -1) or is_first is False
