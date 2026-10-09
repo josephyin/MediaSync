@@ -107,6 +107,39 @@ export const openModeLabels: Record<string, string> = {
 
 export function taskMessage(value: string | null | undefined) {
   if (!value) return '—'
+  if (value.startsWith('Transfer step: ') || value.startsWith('Aliyun Drive: ')
+      || value.endsWith('; automatic retries exhausted')) {
+    const labels: Record<string, string> = {
+      'Transfer step: ': '转存步骤：',
+      'Aliyun Drive: ': '阿里云盘：',
+      'resolve share': '解析分享',
+      'prepare target directory': '准备目标目录',
+      'check existing target file': '检查目标文件是否已存在',
+      'submit shared file copy': '提交转存',
+      'check copy result': '查询转存结果',
+      'copy shared file': '复制分享文件',
+      'refresh credential': '刷新凭证',
+      'validate account': '校验账号',
+      'list share files': '读取分享文件列表',
+      'list target directory': '读取目标目录',
+      'create target directory': '创建目标目录',
+      'request timed out': '请求超时',
+      'network request failed': '网络请求失败',
+      'invalid JSON response': '接口返回无效 JSON',
+      'invalid response': '接口返回无效数据',
+      'request rejected': '接口拒绝请求',
+      'response missing result': '接口未返回结果标识',
+      'target directory does not exist': '目标目录不存在',
+      'cloud-drive request failed': '网盘请求失败',
+      'cloud-drive transfer failed': '网盘转存失败',
+      'automatic retries exhausted': '自动重试次数已耗尽',
+      'Aliyun code=': '阿里错误码=',
+      'unrecognized': '未知（已脱敏）',
+    }
+    let translated = value
+    for (const [text, label] of Object.entries(labels)) translated = translated.replaceAll(text, label)
+    return translated
+  }
   if (value.startsWith('Saved to ')) return `已转存至 ${value.slice('Saved to '.length)}`
   const discovered = /^Discovered (\d+) new items$/.exec(value)
   if (discovered) return `扫描完成：发现 ${discovered[1]} 个新增项目`

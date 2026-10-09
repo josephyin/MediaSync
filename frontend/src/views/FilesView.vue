@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Page } from '../api/client'
 import type { CloudFile, Subscription } from '../api/types'
 import AppIcon from '../components/AppIcon.vue'
-import { formatDateTime, formatFileSize, formatRelativeTime, statusLabel, statusType } from '../utils/display'
+import { formatDateTime, formatFileSize, formatRelativeTime, statusLabel, statusType, taskMessage } from '../utils/display'
 
 const files = ref<CloudFile[]>([])
 const subscriptions = ref<Subscription[]>([])
@@ -30,7 +30,7 @@ function openDetail(file: CloudFile) {
 function resultDescription(file: CloudFile) {
   if (file.status === 'saved') return '转存完成'
   if (file.status === 'saving') return '正在转存到目标云盘'
-  if (file.status === 'failed') return file.last_error || '转存失败，可重新尝试'
+  if (file.status === 'failed') return file.last_error ? taskMessage(file.last_error) : '转存失败，可重新尝试'
   return '等待转存任务处理'
 }
 async function load() {
@@ -250,7 +250,7 @@ onMounted(async () => {
           v-if="selectedFile.last_error"
           class="detail-error"
           title="最近一次错误"
-          :description="selectedFile.last_error"
+          :description="taskMessage(selectedFile.last_error)"
           type="error"
           :closable="false"
           show-icon
