@@ -3,6 +3,7 @@ import json
 import httpx
 import pytest
 
+from app.providers.aliyundrive.errors import AliyunRequestError
 from app.providers.aliyundrive.private_provider import AliyunDrivePrivateProvider
 from app.providers.base import FolderRef, RemoteItem
 
@@ -31,6 +32,55 @@ def make_provider(handler) -> tuple[AliyunDrivePrivateProvider, httpx.AsyncClien
         ),
         client,
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "expected"),
+    [
+        (403, {"code": "DeviceSessionSignatureInvalid", "message": "secret-token"},
+         "Aliyun code=DeviceSessionSignatureInvalid"),
+        (200, {"code": "QuotaExceeded", "message": "secret-token"}, "Aliyun code=QuotaExceeded"),
+        (400, {"code": "secret-token", "message": "secret-token"}, "Aliyun code=unrecognized"),
+    ],
+)
+async def test_copy_failure_preserves_only_safe_diagnostics(status, payload, expected) -> None:
+    provider, client = make_provider(lambda _: httpx.Response(status, json=payload))
+    try:
+        with pytest.raises(AliyunRequestError) as caught:
+            await provider._post_url(
+                "https://api.alipan.test/v2/file/copy?token=secret-token", {}, retryable=False,
+            )
+    finally:
+        await client.aclose()
+    detail = str(caught.value)
+    assert "copy shared file" in detail
+    assert f"HTTP {status}" in detail
+    assert expected in detail
+    assert "secret-token" not in detail
+    assert "https://" not in detail
+
+
+@pytest.mark.parametrize("failure", ["timeout", "network", "json", "response"])
+async def test_request_failures_do_not_expose_response_or_exception_text(failure) -> None:
+    def respond(request):
+        if failure == "timeout":
+            raise httpx.ReadTimeout("secret-token", request=request)
+        if failure == "network":
+            raise httpx.ConnectError("secret-token", request=request)
+        if failure == "json":
+            return httpx.Response(502, text="secret-token")
+        return httpx.Response(200, json=["secret-token"])
+
+    provider, client = make_provider(respond)
+    try:
+        with pytest.raises(AliyunRequestError) as caught:
+            await provider._post_url("https://api.alipan.test/v2/file/list", {}, retryable=False)
+    finally:
+        await client.aclose()
+    assert "list target directory" in str(caught.value)
+    assert "secret-token" not in str(caught.value)
+    if failure == "timeout":
+        assert "request timed out" in str(caught.value)
 
 
 async def test_retries_rate_limited_private_request() -> None:
