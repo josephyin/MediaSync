@@ -134,6 +134,7 @@ export function taskMessage(value: string | null | undefined) {
       'cloud-drive transfer failed': '网盘转存失败',
       'automatic retries exhausted': '自动重试次数已耗尽',
       'Aliyun code=': '阿里错误码=',
+      'QuotaExhausted.Drive': 'QuotaExhausted.Drive（目标网盘空间不足，请释放空间或扩容后重试）',
       'unrecognized': '未知（已脱敏）',
     }
     let translated = value

@@ -40,6 +40,8 @@ def make_provider(handler) -> tuple[AliyunDrivePrivateProvider, httpx.AsyncClien
         (403, {"code": "DeviceSessionSignatureInvalid", "message": "secret-token"},
          "Aliyun code=DeviceSessionSignatureInvalid"),
         (200, {"code": "QuotaExceeded", "message": "secret-token"}, "Aliyun code=QuotaExceeded"),
+        (400, {"code": "QuotaExhausted.Drive", "message": "secret-token"},
+         "Aliyun code=QuotaExhausted.Drive"),
         (400, {"code": "secret-token", "message": "secret-token"}, "Aliyun code=unrecognized"),
     ],
 )
