@@ -3,11 +3,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminUser, DbSession
-from app.core.config import get_settings
 from app.models import CloudFile, Subscription, Task
 from app.repositories import TaskRepository
 from app.services.download_service import DownloadError, destination_path
@@ -18,28 +18,85 @@ from app.services.download_settings import (
 )
 
 router = APIRouter(prefix="/downloads", tags=["downloads"])
+ACTIVE_DOWNLOAD_STATUSES = ("pending", "running", "retry", "cancel_requested", "waiting_credential")
+
+
+def _destination_tasks(db, root, relatives):
+    active, latest = {}, {}
+    for offset in range(0, len(relatives), 200):
+        scope = [
+            Task.type == "download",
+            Task.payload["root"].as_string() == str(root),
+            Task.payload["relative_path"].as_string().in_(relatives[offset : offset + 200]),
+        ]
+        # Keep history lookup bounded to the latest task plus any active tasks.
+        latest_ids = (
+            select(func.max(Task.id))
+            .where(*scope)
+            .group_by(Task.payload["relative_path"].as_string())
+        )
+        rows = db.scalars(
+            select(Task)
+            .where(
+                *scope,
+                or_(Task.status.in_(ACTIVE_DOWNLOAD_STATUSES), Task.id.in_(latest_ids)),
+            )
+            .order_by(Task.id.desc())
+        )
+        for task in rows:
+            relative = task.payload["relative_path"]
+            latest.setdefault(relative, task)
+            if task.status in ACTIVE_DOWNLOAD_STATUSES:
+                active.setdefault(relative, []).append(task)
+    return active, latest
+
+
+def _check_destination(tasks, file_id):
+    if any(task.file_id != file_id for task in tasks):
+        raise HTTPException(409, "其他文件正在使用相同下载路径，请选择不同子目录")
+    return tasks[0] if tasks else None
 
 
 def _create_download(db, file, root, relative, *, predecessor_id=0):
     stat = root.stat()
+    account_id = file.subscription.cloud_account_id
     location = hashlib.sha256(f"{root}\0{relative}".encode()).hexdigest()
-    return TaskRepository(db).create_task(
-        Task(
-            type="download",
-            trigger_type="retry" if predecessor_id else "manual",
-            status="pending",
-            account_id=file.subscription.cloud_account_id,
-            subscription_id=file.subscription_id,
-            file_id=file.id,
-            payload={
-                "relative_path": relative,
-                "root": str(root),
-                "root_identity": [stat.st_dev, stat.st_ino],
-            },
-            idempotency_key=f"download:{file.id}:{location}:{predecessor_id}",
-            message=f"等待下载 → {relative}",
-        )
-    )
+    # A destination-scoped key also arbitrates simultaneous requests for different
+    # files at the same path. Savepoints must belong to a real outer transaction.
+    key = f"download:{location}:{predecessor_id}"
+    existing = db.scalar(select(Task).where(Task.idempotency_key == key))
+    if existing is not None:
+        return _check_destination([existing], file.id)
+    connection = db.connection()
+    if (
+        connection.dialect.name == "sqlite"
+        and not connection.connection.driver_connection.in_transaction
+    ):
+        connection.exec_driver_sql("BEGIN")
+    try:
+        with db.begin_nested():
+            return TaskRepository(db).create_task(
+                Task(
+                    type="download",
+                    trigger_type="retry" if predecessor_id else "manual",
+                    status="pending",
+                    account_id=account_id,
+                    subscription_id=file.subscription_id,
+                    file_id=file.id,
+                    payload={
+                        "relative_path": relative,
+                        "root": str(root),
+                        "root_identity": [stat.st_dev, stat.st_ino],
+                    },
+                    idempotency_key=key,
+                    message=f"等待下载 → {relative}",
+                )
+            )
+    except IntegrityError:
+        existing = db.scalar(select(Task).where(Task.idempotency_key == key))
+        if existing is None:
+            raise
+        return _check_destination([existing], file.id)
 
 
 class DownloadRequest(BaseModel):
@@ -141,7 +198,6 @@ def enqueue_downloads(payload: DownloadRequest, db: DbSession, _: AdminUser):
         raise HTTPException(400, str(exc)) from None
     selected_ids = list(dict.fromkeys(payload.file_ids))
     files_by_id = {}
-    active_by_file = {}
     for offset in range(0, len(selected_ids), 500):
         batch = selected_ids[offset : offset + 500]
         for file in db.scalars(
@@ -150,17 +206,8 @@ def enqueue_downloads(payload: DownloadRequest, db: DbSession, _: AdminUser):
             .where(CloudFile.id.in_(batch))
         ):
             files_by_id[file.id] = file
-        for task in db.scalars(
-            select(Task).where(
-                Task.file_id.in_(batch),
-                Task.type == "download",
-                Task.status.in_(
-                    ["pending", "running", "retry", "cancel_requested", "waiting_credential"]
-                ),
-            )
-        ):
-            active_by_file.setdefault(task.file_id, []).append(task)
     prepared = []
+    destinations = set()
     for file_id in selected_ids:
         file = files_by_id.get(file_id)
         if file is None:
@@ -176,43 +223,21 @@ def enqueue_downloads(payload: DownloadRequest, db: DbSession, _: AdminUser):
             filter(None, [payload.directory.strip(), file.relative_path or file.filename])
         )
         try:
-            destination_path(root, relative)
+            relative = destination_path(root, relative).relative_to(root).as_posix()
         except DownloadError as exc:
             raise HTTPException(400, str(exc)) from None
+        if relative in destinations:
+            raise HTTPException(409, "所选文件包含相同下载路径，请按订阅选择不同子目录")
+        destinations.add(relative)
         prepared.append((file, relative))
+    active, latest = _destination_tasks(db, root, [relative for _file, relative in prepared])
+    for file, relative in prepared:
+        _check_destination(active.get(relative, []), file.id)
     ids = []
     for file, relative in prepared:
-        existing = active_by_file.get(file.id, [])
-        task = next(
-            (
-                x
-                for x in existing
-                if x.payload.get("relative_path") == relative
-                and x.payload.get(
-                    "root", str(Path(get_settings().download_root).expanduser().absolute())
-                )
-                == str(root)
-            ),
-            None,
-        )
+        task = _check_destination(active.get(relative, []), file.id)
         if task is None:
-            previous = db.scalars(
-                select(Task)
-                .where(
-                    Task.file_id == file.id,
-                    Task.type == "download",
-                )
-                .order_by(Task.id.desc())
-            )
-            predecessor = next(
-                (
-                    x
-                    for x in previous
-                    if x.payload.get("root") == str(root)
-                    and x.payload.get("relative_path") == relative
-                ),
-                None,
-            )
+            predecessor = latest.get(relative)
             task = _create_download(
                 db, file, root, relative, predecessor_id=predecessor.id if predecessor else 0
             )
@@ -238,24 +263,8 @@ def retry_download(task_id: int, db: DbSession, _: AdminUser):
         root = validate_directory(str(task.payload["root"]))
     except (ValueError, KeyError):
         raise HTTPException(400, "下载目录不可用，请检查 NAS 挂载后重试") from None
-    active = db.scalars(
-        select(Task).where(
-            Task.file_id == task.file_id,
-            Task.type == "download",
-            Task.status.in_(
-                ["pending", "running", "retry", "waiting_credential", "cancel_requested"]
-            ),
-        )
-    )
-    successor = next(
-        (
-            x
-            for x in active
-            if x.payload.get("root") == str(root)
-            and x.payload.get("relative_path") == task.payload["relative_path"]
-        ),
-        None,
-    )
+    active, _latest = _destination_tasks(db, root, [task.payload["relative_path"]])
+    successor = _check_destination(active.get(task.payload["relative_path"], []), task.file_id)
     if successor is None:
         successor = _create_download(
             db, task.file, root, task.payload["relative_path"], predecessor_id=task.id

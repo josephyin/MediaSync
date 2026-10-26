@@ -154,3 +154,47 @@ async def test_replaced_mount_is_rejected_before_network_access(download_env):
     outcome = await execute_download(task_id, sessions)
     assert outcome.status == "failed" and outcome.error_code == "DOWNLOAD_FAILED"
     assert "挂载已变化" in outcome.error_message
+
+
+@pytest.mark.parametrize("new_login", [False, True])
+@pytest.mark.parametrize("request_fails", [False, True])
+async def test_token_rotation_cannot_overwrite_a_concurrent_login(
+    download_env, monkeypatch, new_login, request_fails
+):
+    import app.services.download_service as service
+    from app.core.security import get_credential_cipher
+    from app.providers.pikpak.errors import PikPakRequestError
+    from app.services.account_service import get_decrypted_token
+
+    sessions, task_id, _file_id = download_env
+    cipher = get_credential_cipher()
+    with sessions() as db:
+        account_id = db.get(Task, task_id).account_id
+    new_credential = cipher.encrypt("new-login-token")
+
+    class Provider:
+        async def get_download_url(self, _remote_id):
+            if request_fails:
+                raise PikPakRequestError("PikPak 下载请求被拒绝")
+            return "https://dl.mypikpak.com/a"
+
+        def consume_refresh_token_update(self):
+            return "rotated-old-token"
+
+    class RacingCipher:
+        def encrypt(self, value):
+            # Reproduce a login occurring between credential read and rotation write.
+            if new_login:
+                with sessions.begin() as db:
+                    db.get(CloudAccount, account_id).refresh_token = new_credential
+            return cipher.encrypt(value)
+
+    monkeypatch.setattr(service, "get_provider", lambda *_args: Provider())
+    monkeypatch.setattr(service, "get_credential_cipher", RacingCipher)
+    outcome = await service.execute_download(task_id, sessions)
+    assert outcome.status == ("failed" if request_fails else "deferred")
+    with sessions() as db:
+        account = db.get(CloudAccount, account_id)
+        assert get_decrypted_token(account) == (
+            "new-login-token" if new_login else "rotated-old-token"
+        )

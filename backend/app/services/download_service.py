@@ -7,14 +7,15 @@ import time
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 
 from app.core.config import get_settings
-from app.models import Task
+from app.core.security import get_credential_cipher
+from app.models import CloudAccount, Task
 from app.models.base import utcnow
 from app.providers import get_provider
 from app.providers.pikpak.errors import PikPakCredentialError, PikPakRequestError
-from app.services.account_service import get_decrypted_token, persist_provider_token
+from app.services.account_service import get_decrypted_token
 from app.services.download_stream import (
     DownloadDeferred,
     DownloadError,
@@ -32,6 +33,18 @@ def destination_path(root: Path, relative: str) -> Path:
         raise DownloadError("下载路径必须是根目录下的相对路径，不能包含 . 或 ..")
     if "\\" in relative or "\x00" in relative:
         raise DownloadError("下载路径包含无效字符")
+    if any(
+        part.startswith(".")
+        and part.endswith(
+            (
+                ".mediasync.part",
+                ".mediasync.json",
+                ".mediasync.json.tmp",
+            )
+        )
+        for part in path.parts
+    ):
+        raise DownloadError("文件名使用了下载恢复文件保留格式，无法下载")
     if not root.is_dir():
         raise DownloadError("下载根目录不存在，请先创建目录或挂载 NAS")
     root = root.resolve()
@@ -77,13 +90,23 @@ async def execute_download(task_id, session_factory, *, context=None):
             expected_hash = file.content_hash
             remote_id = file.target_file_id
             account_id = account.id
+            original_credential = account.refresh_token
             provider = get_provider(account.provider, get_decrypted_token(account))
         try:
             url = await provider.get_download_url(remote_id)
         finally:
-            with session_factory() as db:
-                account = db.get(type(account), account_id)
-                if account and persist_provider_token(account, provider):
+            rotated = provider.consume_refresh_token_update()
+            if rotated:
+                encrypted = get_credential_cipher().encrypt(rotated)
+                with session_factory() as db:
+                    db.execute(
+                        update(CloudAccount)
+                        .where(
+                            CloudAccount.id == account_id,
+                            CloudAccount.refresh_token == original_credential,
+                        )
+                        .values(refresh_token=encrypted)
+                    )
                     db.commit()
         last_progress = 0.0
 
@@ -115,7 +138,7 @@ async def execute_download(task_id, session_factory, *, context=None):
             progress,
             cancelled,
             guard=guard,
-            identity=remote_id,
+            identity=f"{account_id}:{remote_id}",
             expected_hash=expected_hash,
             chunk_bytes=settings.download_chunk_bytes,
             rate_limit=settings.download_rate_limit_kib * 1024,

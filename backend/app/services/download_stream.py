@@ -150,6 +150,12 @@ async def stream_download(
                 state.get("identity") != fingerprint
                 or os.fstat(output.fileno()).st_size > expected_size
             ):
+                if (
+                    state.get("identity")
+                    and state.get("identity") != fingerprint
+                    and os.fstat(output.fileno()).st_size > 0
+                ):
+                    raise DownloadError("此路径存在其他文件的下载进度，请选择不同子目录")
                 output.truncate(0)
                 state = {"identity": fingerprint, "digests": []}
             _checkpoint(checkpoint, state)

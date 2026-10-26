@@ -11,7 +11,20 @@ from app.services.download_service import (
 )
 
 
-@pytest.mark.parametrize("value", ["../x", "/tmp/x", "a/../../x", "a/./x", "a\\x", ""])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "../x",
+        "/tmp/x",
+        "a/../../x",
+        "a/./x",
+        "a\\x",
+        "",
+        ".movie.mediasync.part",
+        ".movie.mediasync.json",
+        ".movie.mediasync.json.tmp",
+    ],
+)
 def test_reject_unsafe_path(tmp_path, value):
     with pytest.raises(DownloadError):
         destination_path(tmp_path, value)

@@ -120,7 +120,7 @@ async def test_ignored_range_restarts_without_appending(tmp_path):
     assert target.read_bytes() == b"hello"
 
 
-async def test_changed_remote_identity_restarts_partial(tmp_path):
+async def test_different_file_cannot_erase_another_downloads_partial(tmp_path):
     requests = []
 
     def respond(request):
@@ -128,19 +128,42 @@ async def test_changed_remote_identity_restarts_partial(tmp_path):
         return range_response(request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        for identity in ("old-file", "new-file"):
-            with pytest.raises(DownloadDeferred):
-                await stream_download(
-                    "https://dl.mypikpak.com/a",
-                    tmp_path / "movie",
-                    5,
-                    no_progress,
-                    no_cancel,
-                    client=client,
-                    chunk_bytes=3,
-                    identity=identity,
-                )
-    assert requests == ["bytes=0-2", "bytes=0-2"]
+        with pytest.raises(DownloadDeferred):
+            await stream_download(
+                "https://dl.mypikpak.com/a",
+                tmp_path / "movie",
+                5,
+                no_progress,
+                no_cancel,
+                client=client,
+                chunk_bytes=3,
+                identity="old-file",
+            )
+        with pytest.raises(DownloadError, match="其他文件"):
+            await stream_download(
+                "https://dl.mypikpak.com/a",
+                tmp_path / "movie",
+                5,
+                no_progress,
+                no_cancel,
+                client=client,
+                chunk_bytes=3,
+                identity="new-file",
+            )
+        assert (tmp_path / ".movie.mediasync.part").read_bytes() == b"hel"
+        # The original job can still finish from its preserved checkpoint.
+        await stream_download(
+            "https://dl.mypikpak.com/a",
+            tmp_path / "movie",
+            5,
+            no_progress,
+            no_cancel,
+            client=client,
+            chunk_bytes=3,
+            identity="old-file",
+        )
+    assert requests == ["bytes=0-2", "bytes=3-4"]
+    assert (tmp_path / "movie").read_bytes() == b"hello"
 
 
 async def test_restart_after_atomic_publication_finishes_without_overwrite(tmp_path, monkeypatch):
