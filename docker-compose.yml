@@ -10,6 +10,10 @@ x-mediasync-backend: &mediasync-backend
   environment:
     ENVIRONMENT: production
     DATABASE_URL: sqlite:////data/mediasync.db
+    DOWNLOAD_ROOT: ${DOWNLOAD_ROOT:-/data/downloads}
+    DOWNLOAD_SETTINGS_PATH: /data/config/download-settings.json
+    DOWNLOAD_RATE_LIMIT_KIB: ${DOWNLOAD_RATE_LIMIT_KIB:-0}
+    DOWNLOAD_CHUNK_BYTES: ${DOWNLOAD_CHUNK_BYTES:-33554432}
     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
     CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?Set CREDENTIAL_ENCRYPTION_KEY in .env}
     ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}

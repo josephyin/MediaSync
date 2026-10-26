@@ -10,6 +10,7 @@ from typing import Literal, Protocol
 from app.models import Task
 
 TaskOutcomeStatus = Literal[
+    "deferred",
     "success",
     "retry",
     "failed",
@@ -110,8 +111,8 @@ class TaskOutcome:
             raise ValueError("retry outcome requires error_code")
         if self.status == "waiting_credential" and self.blocked_reason is None:
             raise ValueError("waiting_credential outcome requires blocked_reason")
-        if self.status != "retry" and self.retry_after is not None:
-            raise ValueError("retry_after is only valid for retry outcomes")
+        if self.status not in {"retry", "deferred"} and self.retry_after is not None:
+            raise ValueError("retry_after is only valid for retry or deferred outcomes")
         if self.status != "waiting_credential" and self.blocked_reason is not None:
             raise ValueError(
                 "blocked_reason is only valid for waiting_credential outcomes"

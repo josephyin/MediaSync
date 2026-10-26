@@ -117,6 +117,15 @@ def test_login_api_auth_encryption_and_duplicate(monkeypatch):
             assert client.post("/api/v1/pikpak/login", json=payload).status_code == 401
             assert calls == []
             app.dependency_overrides[require_admin] = lambda: "admin"
+            invalid = client.post(
+                "/api/v1/pikpak/login",
+                json={
+                    **payload,
+                    "password": {"secret": "invalid-private-password"},
+                },
+            )
+            assert invalid.status_code == 422
+            assert "invalid-private-password" not in invalid.text
             result = client.post("/api/v1/pikpak/login", json=payload)
             assert result.status_code == 201, result.text
             assert result.json()["provider"] == "pikpak"

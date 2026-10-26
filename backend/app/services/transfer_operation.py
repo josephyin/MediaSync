@@ -15,6 +15,7 @@ from app.providers.base import (
     RemoteItem,
     ResumableSaveProvider,
     SaveResult,
+    VerifiedExistingSaveProvider,
 )
 
 CancellationProbe = Callable[[], Awaitable[bool]]
@@ -107,11 +108,18 @@ async def execute_transfer(
             cancellation_requested=cancellation_requested,
         ),
     )
+    source = RemoteItem(
+        remote_file_id=spec.remote_file_id, parent_id=spec.parent_remote_file_id,
+        filename=spec.filename, item_type=spec.item_type, size=spec.size,
+        content_hash=spec.content_hash,
+    )
     if provider_operation_id is None:
         existing = await _provider_step(
             "check existing target file", provider.find_target_item(target, spec.filename),
         )
         if existing is not None:
+            if isinstance(provider, VerifiedExistingSaveProvider):
+                provider.validate_existing_item(source, existing)
             return TransferOperationResult(
                 target_file_id=existing.remote_file_id,
                 target_path=str(PurePosixPath(target.path) / spec.filename),
@@ -120,14 +128,6 @@ async def execute_transfer(
 
     if await cancellation_requested():
         raise TransferCancelledError("transfer cancelled before remote save")
-    source = RemoteItem(
-        remote_file_id=spec.remote_file_id,
-        parent_id=spec.parent_remote_file_id,
-        filename=spec.filename,
-        item_type=spec.item_type,
-        size=spec.size,
-        content_hash=spec.content_hash,
-    )
     if isinstance(provider, ResumableSaveProvider):
         operation_id = provider_operation_id
         if operation_id is None:

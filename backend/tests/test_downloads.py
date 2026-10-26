@@ -60,10 +60,13 @@ async def test_download_verified_then_published_no_overwrite(tmp_path):
             == 5
         )
         assert target.read_bytes() == b"hello"
-        with pytest.raises(DownloadError):
+        # A persisted completion receipt makes restart after atomic publication idempotent.
+        assert (
             await stream_download(
                 "https://dl.mypikpak.com/a", target, 5, no_progress, no_cancel, client=client
             )
+            == 5
+        )
         assert target.read_bytes() == b"hello"
 
 
@@ -222,10 +225,18 @@ def test_download_api_requires_login_and_deduplicates(tmp_path, monkeypatch):
             )
 
             assert client.post(f"/api/v1/downloads/{task_id}/cancel").status_code == 202
-            assert client.post(f"/api/v1/downloads/{task_id}/retry").status_code == 202
+            retry = client.post(f"/api/v1/downloads/{task_id}/retry")
+            assert retry.status_code == 202
+            successor_id = retry.json()["task_id"]
+            assert successor_id != task_id
+            assert (
+                client.post(f"/api/v1/downloads/{task_id}/retry").json()["task_id"] == successor_id
+            )
             with Session(engine) as db:
                 assert db.get(CloudFile, file_id).status == "saved"
-                assert db.get(Task, task_id).status == "pending"
+                assert db.get(Task, task_id).status == "cancelled"
+                assert db.get(Task, successor_id).status == "pending"
+                assert db.get(Task, task_id).completed_at is not None
             with Session(engine) as db:
                 subscription_id = db.get(CloudFile, file_id).subscription_id
                 for index in range(126):

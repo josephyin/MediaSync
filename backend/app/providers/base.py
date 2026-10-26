@@ -89,6 +89,11 @@ class CloudDriveProvider(Protocol):
 
 
 @runtime_checkable
+class VerifiedExistingSaveProvider(Protocol):
+    def validate_existing_item(self, source: RemoteItem, existing: RemoteItem) -> None: ...
+
+
+@runtime_checkable
 class ResumableSaveProvider(Protocol):
     async def start_save_shared_item(
         self, share: ShareInfo, source: RemoteItem, target: FolderRef

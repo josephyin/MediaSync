@@ -3,25 +3,27 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
-import os
 import time
+from datetime import timedelta
 from pathlib import Path, PurePosixPath
-from urllib.parse import urlsplit
 
-import httpx
 from sqlalchemy import or_, select
 
 from app.core.config import get_settings
 from app.models import Task
 from app.models.base import utcnow
 from app.providers import get_provider
+from app.providers.pikpak.errors import PikPakCredentialError, PikPakRequestError
 from app.services.account_service import get_decrypted_token, persist_provider_token
+from app.services.download_stream import (
+    DownloadDeferred,
+    DownloadError,
+    stream_download,
+)
+from app.services.download_stream import (
+    validate_download_url as validate_download_url,
+)
 from app.task_engine.handlers import TaskOutcome
-
-
-class DownloadError(ValueError):
-    pass
 
 
 def destination_path(root: Path, relative: str) -> Path:
@@ -44,75 +46,6 @@ def destination_path(root: Path, relative: str) -> Path:
     return target
 
 
-def validate_download_url(url: str) -> None:
-    parsed = urlsplit(url)
-    host = parsed.hostname or ""
-    if (
-        parsed.scheme != "https"
-        or parsed.username
-        or parsed.password
-        or parsed.port not in (None, 443)
-        or not (host == "mypikpak.com" or host.endswith(".mypikpak.com"))
-    ):
-        raise DownloadError("PikPak 返回了不受支持的下载地址")
-
-
-async def stream_download(url, target, expected_size, progress, cancelled, *, client=None):
-    """Write a private partial file; publish only after a complete size check."""
-    validate_download_url(url)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name("." + target.name + ".mediasync.part")
-    flags = os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW
-    fd = os.open(partial, flags, 0o600)
-    owned = client is None
-    client = client or httpx.AsyncClient(timeout=httpx.Timeout(60, connect=20), trust_env=False)
-    try:
-        with os.fdopen(fd, "w+b") as output:
-            try:
-                fcntl.flock(output, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise DownloadError("同一目标文件已有下载任务") from None
-            if target.exists() or target.is_symlink():
-                raise DownloadError("目标文件已存在，请换一个目录；不会覆盖现有文件")
-            output.truncate(0)
-            written = 0
-            for redirects in range(6):
-                validate_download_url(url)
-                async with client.stream("GET", url, follow_redirects=False) as response:
-                    if response.is_redirect:
-                        if redirects == 5 or "location" not in response.headers:
-                            raise DownloadError("下载重定向次数过多")
-                        url = str(response.url.join(response.headers["location"]))
-                        continue
-                    if response.status_code != 200:
-                        raise DownloadError(
-                            f"下载请求失败（HTTP {response.status_code}），可重试获取新链接"
-                        )
-                    async for chunk in response.aiter_bytes(1024 * 1024):
-                        if await cancelled():
-                            raise asyncio.CancelledError
-                        written += len(chunk)
-                        if expected_size is not None and written > expected_size:
-                            raise DownloadError("下载内容超出文件记录大小")
-                        await asyncio.to_thread(output.write, chunk)
-                        await progress(written)
-                    break
-            if expected_size is not None and written != expected_size:
-                raise DownloadError("文件大小校验失败，未发布不完整文件")
-            if await cancelled():
-                raise asyncio.CancelledError
-            await asyncio.to_thread(output.flush)
-            await asyncio.to_thread(os.fsync, output.fileno())
-            # Hard-link publication is atomic and never replaces an existing file.
-            # Unsupported NAS filesystems fail explicitly instead of overwriting.
-            await asyncio.to_thread(os.link, partial, target)
-            partial.unlink()
-            return written
-    finally:
-        if owned:
-            await client.aclose()
-
-
 async def execute_download(task_id, session_factory, *, context=None):
     provider = None
     account_id = None
@@ -126,11 +59,22 @@ async def execute_download(task_id, session_factory, *, context=None):
             if account.provider != "pikpak" or file.status != "saved" or not file.target_file_id:
                 raise DownloadError("目前支持下载 PikPak 已转存的文件")
             relative = str(task.payload.get("relative_path", ""))
+            root = Path(str(task.payload.get("root") or get_settings().download_root)).expanduser()
             target = destination_path(
-                Path(str(task.payload.get("root") or get_settings().download_root)).expanduser(),
+                root,
                 relative,
             )
+            root_identity = task.payload.get("root_identity")
+
+            def guard():
+                stat = root.stat()
+                if root_identity and [stat.st_dev, stat.st_ino] != root_identity:
+                    raise DownloadError("下载目录挂载已变化，请检查 NAS 后重新选择目录")
+                destination_path(root, relative)
+
+            guard()
             expected_size = file.size
+            expected_hash = file.content_hash
             remote_id = file.target_file_id
             account_id = account.id
             provider = get_provider(account.provider, get_decrypted_token(account))
@@ -163,10 +107,38 @@ async def execute_download(task_id, session_factory, *, context=None):
                     current.message = f"下载中：{count:,}{total} 字节 → {relative}"
                     db.commit()
 
-        count = await stream_download(url, target, expected_size, progress, cancelled)
+        settings = get_settings()
+        count = await stream_download(
+            url,
+            target,
+            expected_size,
+            progress,
+            cancelled,
+            guard=guard,
+            identity=remote_id,
+            expected_hash=expected_hash,
+            chunk_bytes=settings.download_chunk_bytes,
+            rate_limit=settings.download_rate_limit_kib * 1024,
+        )
         return TaskOutcome(status="success", summary=f"已下载 {count:,} 字节 → {target}")
+    except DownloadDeferred as exc:
+        return TaskOutcome(
+            status="deferred",
+            summary=f"下载已保存进度：{exc.count:,} 字节，等待继续",
+            metrics={"continuation": True, "downloaded_bytes": exc.count},
+            retry_after=timedelta(seconds=1),
+        )
+    except PikPakCredentialError as exc:
+        return TaskOutcome(
+            status="waiting_credential",
+            error_code=exc.code,
+            error_message=str(exc),
+            blocked_reason="PikPak credential requires user action",
+        )
+    except PikPakRequestError as exc:
+        return TaskOutcome(status="failed", error_code=exc.code, error_message=str(exc))
     except asyncio.CancelledError:
-        return TaskOutcome(status="cancelled", summary="下载已取消，临时文件保留；重试会重新下载")
+        return TaskOutcome(status="cancelled", summary="下载已取消，临时文件保留；重试可继续下载")
     except DownloadError as exc:
         return TaskOutcome(status="failed", error_code="DOWNLOAD_FAILED", error_message=str(exc))
     except OSError:
@@ -196,6 +168,10 @@ async def process_pending_downloads():
     from app.core.database import SessionLocal
 
     with SessionLocal() as db:
+        from app.services.update_execution_gate import build_update_execution_gate
+
+        if build_update_execution_gate().evaluate(db).blocked:
+            return
         task = db.scalar(
             select(Task)
             .where(
@@ -218,8 +194,14 @@ async def process_pending_downloads():
     with SessionLocal() as db:
         task = db.get(Task, task_id)
         if task:
-            task.status = outcome.status
+            # Legacy has no leased TaskRun; cooperative slices still release its slot.
+            if task.status == "cancel_requested" and outcome.status == "deferred":
+                outcome = TaskOutcome(status="cancelled", summary="下载已取消，临时文件保留")
+            task.status = "pending" if outcome.status == "deferred" else outcome.status
+            task.next_attempt_at = (
+                utcnow() + timedelta(seconds=1) if outcome.status == "deferred" else None
+            )
             task.message = outcome.summary or outcome.error_message
             task.error_code = outcome.error_code
-            task.finished_at = utcnow()
+            task.finished_at = None if outcome.status == "deferred" else utcnow()
             db.commit()

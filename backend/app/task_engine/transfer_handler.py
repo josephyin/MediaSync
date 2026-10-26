@@ -21,6 +21,7 @@ from app.models.base import utcnow
 from app.providers import get_provider
 from app.providers.aliyundrive.errors import AliyunRequestError
 from app.providers.base import CloudDriveProvider
+from app.providers.pikpak.errors import PikPakCredentialError, PikPakRequestError
 from app.services.account_service import (
     get_decrypted_token,
     get_runtime_provider,
@@ -78,9 +79,7 @@ class TransferPayloadV1:
                 f"unsupported transfer payload version {invocation.payload_version}"
             )
         if invocation.subscription_id is None or invocation.file_id is None:
-            raise TransferPayloadError(
-                "transfer payload v1 requires subscription_id and file_id"
-            )
+            raise TransferPayloadError("transfer payload v1 requires subscription_id and file_id")
         if invocation.payload:
             raise TransferPayloadError("transfer payload v1 does not accept extra fields")
         return cls(
@@ -369,9 +368,7 @@ class TransferTaskHandler:
         with self._session_factory() as session, session.begin():
             file = self._require_file(session, file_id)
             file.status = (
-                "failed"
-                if disposition.status == "failed" or retry_exhausted
-                else "pending"
+                "failed" if disposition.status == "failed" or retry_exhausted else "pending"
             )
             file.last_error = disposition.safe_message
 
@@ -381,8 +378,7 @@ class TransferTaskHandler:
         disposition: _FailureDisposition,
     ) -> bool:
         return (
-            disposition.status == "retry"
-            and context.task.retry_count >= context.task.max_retries
+            disposition.status == "retry" and context.task.retry_count >= context.task.max_retries
         )
 
     def _mark_cancelled(self, file_id: int) -> None:
@@ -430,7 +426,8 @@ class TransferTaskHandler:
 
     @staticmethod
     def _failure_for_context(
-        exc: Exception, context: TaskExecutionContext,
+        exc: Exception,
+        context: TaskExecutionContext,
     ) -> _FailureDisposition:
         disposition = TransferTaskHandler._classify_failure(exc)
         if TransferTaskHandler._retry_exhausted(context, disposition):
@@ -465,17 +462,23 @@ class TransferTaskHandler:
             )
         message = str(exc).lower()
         credential_value_error = isinstance(exc, ValueError) and "credential" in message
-        credential_provider_error = isinstance(
-            exc, ProviderRequestError
-        ) and any(marker in message for marker in _CREDENTIAL_ERROR_MARKERS)
-        if credential_value_error or credential_provider_error or (
-            isinstance(exc, AliyunRequestError) and exc.credential_invalid
+        credential_provider_error = isinstance(exc, ProviderRequestError) and any(
+            marker in message for marker in _CREDENTIAL_ERROR_MARKERS
+        )
+        if (
+            credential_value_error
+            or credential_provider_error
+            or isinstance(exc, PikPakCredentialError)
+            or (isinstance(exc, AliyunRequestError) and exc.credential_invalid)
         ):
             return _FailureDisposition(
                 status="waiting_credential",
                 error_code="CREDENTIAL_INVALID",
-                safe_message=(str(exc) if isinstance(exc, AliyunRequestError)
-                              else "cloud-drive credential is invalid or expired"),
+                safe_message=(
+                    str(exc)
+                    if isinstance(exc, (AliyunRequestError, PikPakRequestError))
+                    else "cloud-drive credential is invalid or expired"
+                ),
                 blocked_reason="cloud-drive credential requires user action",
             )
         if isinstance(exc, ProviderRequestError):
@@ -489,13 +492,18 @@ class TransferTaskHandler:
                 )
             safe_message = (
                 str(exc)
-                if isinstance(exc, AliyunRequestError) or exc.code.startswith(("QUARK_", "PAN123_"))
+                if isinstance(exc, (AliyunRequestError, PikPakRequestError))
+                or exc.code.startswith(("QUARK_", "PAN123_"))
                 else "cloud-drive request failed and can be retried"
             )
             stage = getattr(exc, "transfer_stage", None)
             if isinstance(exc, AliyunRequestError) and stage in {
-                "resolve share", "prepare target directory", "check existing target file",
-                "submit shared file copy", "check copy result", "copy shared file",
+                "resolve share",
+                "prepare target directory",
+                "check existing target file",
+                "submit shared file copy",
+                "check copy result",
+                "copy shared file",
             }:
                 safe_message = f"Transfer step: {stage}; {safe_message}"
             return _FailureDisposition(
@@ -517,11 +525,16 @@ class TransferTaskHandler:
 
     @staticmethod
     def _outcome_for_failure(
-        disposition: _FailureDisposition, *, task_id: int | None = None,
+        disposition: _FailureDisposition,
+        *,
+        task_id: int | None = None,
     ) -> TaskOutcome:
         logger.warning(
             "transfer_failed task_id=%s status=%s error_code=%s detail=%s",
-            task_id, disposition.status, disposition.error_code, disposition.safe_message,
+            task_id,
+            disposition.status,
+            disposition.error_code,
+            disposition.safe_message,
         )
         if disposition.status == "waiting_credential":
             return TaskOutcome(

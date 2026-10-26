@@ -17,6 +17,7 @@ from app.models import CloudAccount, Subscription
 from app.providers import get_provider
 from app.providers.aliyundrive.errors import AliyunRequestError
 from app.providers.base import CloudDriveProvider
+from app.providers.pikpak.errors import PikPakCredentialError, PikPakRequestError
 from app.services.account_service import get_decrypted_token, persist_provider_token
 from app.services.scan_service import (
     ScanCancelledError,
@@ -67,9 +68,7 @@ class ScanPayloadV1:
         if invocation.task_type != "scan":
             raise ScanPayloadError("scan handler requires task type 'scan'")
         if invocation.payload_version != 1:
-            raise ScanPayloadError(
-                f"unsupported scan payload version {invocation.payload_version}"
-            )
+            raise ScanPayloadError(f"unsupported scan payload version {invocation.payload_version}")
         if invocation.subscription_id is None:
             raise ScanPayloadError("scan payload v1 requires subscription_id")
         unknown_fields = set(invocation.payload) - {"force_full"}
@@ -304,17 +303,23 @@ class ScanTaskHandler:
             )
         message = str(exc).lower()
         credential_value_error = isinstance(exc, ValueError) and "credential" in message
-        credential_provider_error = isinstance(
-            exc, ProviderRequestError
-        ) and any(marker in message for marker in _CREDENTIAL_ERROR_MARKERS)
-        if credential_value_error or credential_provider_error or (
-            isinstance(exc, AliyunRequestError) and exc.credential_invalid
+        credential_provider_error = isinstance(exc, ProviderRequestError) and any(
+            marker in message for marker in _CREDENTIAL_ERROR_MARKERS
+        )
+        if (
+            credential_value_error
+            or credential_provider_error
+            or isinstance(exc, PikPakCredentialError)
+            or (isinstance(exc, AliyunRequestError) and exc.credential_invalid)
         ):
             return _FailureDisposition(
                 status="waiting_credential",
                 error_code="CREDENTIAL_INVALID",
-                safe_message=(str(exc) if isinstance(exc, AliyunRequestError)
-                              else "cloud-drive credential is invalid or expired"),
+                safe_message=(
+                    str(exc)
+                    if isinstance(exc, (AliyunRequestError, PikPakRequestError))
+                    else "cloud-drive credential is invalid or expired"
+                ),
                 blocked_reason="cloud-drive credential requires user action",
             )
         if isinstance(exc, ProviderRequestError):
@@ -322,7 +327,8 @@ class ScanTaskHandler:
                 status="retry",
                 error_code=exc.code,
                 safe_message=(
-                    str(exc) if isinstance(exc, AliyunRequestError)
+                    str(exc)
+                    if isinstance(exc, (AliyunRequestError, PikPakRequestError))
                     else "cloud-drive scan request failed and can be retried"
                 ),
             )

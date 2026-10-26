@@ -1,6 +1,7 @@
 # PikPak 与可恢复本地下载
 
-状态：设计提案；设计 PR 合并后生效。关联现有 Task Engine v2、Provider 写入契约及
+状态：已接受（[设计 PR #175](https://github.com/josephyin/MediaSync/pull/175)）。
+关联现有 Task Engine v2、Provider 写入契约及
 ADR-0001 单 Worker 决策。无数据库迁移，不增加 Worker 副本。
 
 ## 业务边界

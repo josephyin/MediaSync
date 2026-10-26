@@ -249,6 +249,10 @@ class ApplianceLauncher:
 
         environment = dict(self._base_environment)
         environment.update(preparation.values.as_environment())
+        environment.setdefault("DOWNLOAD_ROOT", str(self._data_directory / "downloads"))
+        environment.setdefault("DOWNLOAD_SETTINGS_PATH", str(
+            self._data_directory / RUNTIME_CONFIG_DIRECTORY / "download-settings.json"
+        ))
         environment.update(
             {
                 "DATABASE_URL": DEFAULT_DATABASE_URL,

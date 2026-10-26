@@ -15,7 +15,6 @@ import httpx
 from app.core.exceptions import (
     ProviderCapabilityError,
     ProviderPaginationError,
-    ProviderRequestError,
     ProviderWriteUncertainError,
 )
 from app.providers.base import (
@@ -28,6 +27,7 @@ from app.providers.base import (
     SaveResult,
     ShareInfo,
 )
+from app.providers.pikpak.errors import PikPakCredentialError, PikPakRequestError
 
 AUTH_URL = "https://user.mypikpak.com"
 DRIVE_URL = "https://api-drive.mypikpak.com"
@@ -71,9 +71,7 @@ def parse_share_url(value: str) -> tuple[str, str]:
             raise ValueError
         return parts[1], parts[2] if len(parts) == 3 else "root"
     except ValueError:
-        raise ProviderRequestError(
-            "Use a PikPak HTTPS share URL: https://mypikpak.com/s/…"
-        ) from None
+        raise PikPakRequestError("Use a PikPak HTTPS share URL: https://mypikpak.com/s/…") from None
 
 
 class PikPakProvider:
@@ -91,12 +89,12 @@ class PikPakProvider:
             try:
                 credentials = json.loads(value)
             except ValueError:
-                raise ProviderRequestError("Invalid PikPak credential JSON") from None
+                raise PikPakRequestError("Invalid PikPak credential JSON") from None
         if not isinstance(credentials, dict):
-            raise ProviderRequestError("Invalid PikPak credentials")
+            raise PikPakRequestError("Invalid PikPak credentials")
         token = credentials.get("refresh_token")
         if not isinstance(token, str) or not token.strip():
-            raise ProviderRequestError("PikPak Refresh Token is required")
+            raise PikPakRequestError("PikPak Refresh Token is required")
         self._credentials = {
             "refresh_token": token.strip(),
             "client_id": credentials.get("client_id", WEB_CLIENT_ID),
@@ -106,7 +104,7 @@ class PikPakProvider:
             not isinstance(self._credentials[key], str) or not _ID.fullmatch(self._credentials[key])
             for key in ("client_id", "device_id")
         ):
-            raise ProviderRequestError("Invalid PikPak client_id or device_id")
+            raise PikPakRequestError("Invalid PikPak client_id or device_id")
         self._http_client = http_client
         self._access_token: str | None = None
         self._expires_at = 0.0
@@ -131,12 +129,12 @@ class PikPakProvider:
                 async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
                     response = await client.request(method, url, **kwargs)
         except httpx.HTTPError:
-            error = ProviderWriteUncertainError if write else ProviderRequestError
+            error = ProviderWriteUncertainError if write else PikPakRequestError
             raise error(
                 "PikPak request interrupted; verify remote results before retrying writes"
             ) from None
         # Never include upstream bodies, URLs, or exception strings in logs/errors.
-        error = ProviderWriteUncertainError if write else ProviderRequestError
+        error = ProviderWriteUncertainError if write else PikPakRequestError
         if response.status_code >= 500 or response.status_code in (408, 429):
             raise error(f"PikPak temporarily unavailable (HTTP {response.status_code})")
         try:
@@ -146,7 +144,7 @@ class PikPakProvider:
         if not isinstance(payload, dict):
             raise error("PikPak returned an invalid response")
         if response.status_code in (401, 403) or payload.get("error_code") in (16, 4126):
-            raise ProviderRequestError(
+            raise PikPakCredentialError(
                 "PikPak authorization expired or requires verification; "
                 "sign in on the official website and update the credential"
             )
@@ -180,7 +178,7 @@ class PikPakProvider:
             )
             code = payload.get("error_code")
             suffix = f"，错误码 {code}" if type(code) is int else ""
-            raise ProviderRequestError(
+            raise PikPakRequestError(
                 f"PikPak {stage}失败：{reason}（HTTP {response.status_code}{suffix}）"
             )
         return payload
@@ -200,7 +198,7 @@ class PikPakProvider:
         token = payload.get("access_token")
         refresh = payload.get("refresh_token")
         if not isinstance(token, str) or not token or not isinstance(refresh, str) or not refresh:
-            raise ProviderRequestError("PikPak token response is incomplete")
+            raise PikPakRequestError("PikPak token response is incomplete")
         self._access_token = token
         self._credentials["refresh_token"] = refresh
         self._token_update = json.dumps(self._credentials, separators=(",", ":"))
@@ -239,7 +237,7 @@ class PikPakProvider:
         )
         token = payload.get("captcha_token")
         if payload.get("url") or not isinstance(token, str) or not token:
-            raise ProviderRequestError("PikPak 要求人机验证，请在官方网页完成验证后重试")
+            raise PikPakRequestError("PikPak 要求人机验证，请在官方网页完成验证后重试")
         self._captcha_token = token
         lifetime = payload.get("expires_in", 300)
         if isinstance(lifetime, str) and lifetime.isdecimal():
@@ -266,7 +264,7 @@ class PikPakProvider:
     async def validate_account(self) -> AccountProfile:
         payload = await self._request("GET", "/drive/v1/about")
         if not isinstance(payload.get("quota"), dict) or not self._user_id:
-            raise ProviderRequestError("PikPak account response is incomplete")
+            raise PikPakRequestError("PikPak account response is incomplete")
         return AccountProfile(
             identity=f"PikPak {self._user_id}",
             user_id=self._user_id,
@@ -279,13 +277,13 @@ class PikPakProvider:
         if folder_id in ("", "root", "/"):
             return ""
         if not _ID.fullmatch(folder_id):
-            raise ProviderRequestError("Invalid PikPak folder ID")
+            raise PikPakRequestError("Invalid PikPak folder ID")
         return folder_id
 
     @staticmethod
     def _item(raw: object) -> RemoteItem:
         if not isinstance(raw, dict):
-            raise ProviderRequestError("PikPak returned an invalid file")
+            raise PikPakRequestError("PikPak returned an invalid file")
         file_id, name, kind = raw.get("id"), raw.get("name"), raw.get("kind")
         if (
             not isinstance(file_id, str)
@@ -294,7 +292,7 @@ class PikPakProvider:
             or not name
             or kind not in ("drive#file", "drive#folder")
         ):
-            raise ProviderRequestError("PikPak file metadata is incomplete")
+            raise PikPakRequestError("PikPak file metadata is incomplete")
         size = raw.get("size")
         if isinstance(size, str) and size.isdecimal():
             size = int(size)
@@ -324,10 +322,10 @@ class PikPakProvider:
     def _page(cls, payload: dict, marker: str | None) -> RemotePage:
         files = payload.get("files")
         if not isinstance(files, list):
-            raise ProviderRequestError("PikPak listing is missing files")
+            raise PikPakRequestError("PikPak listing is missing files")
         next_marker = payload.get("next_page_token") or None
         if next_marker is not None and not isinstance(next_marker, str):
-            raise ProviderRequestError("PikPak returned an invalid page token")
+            raise PikPakRequestError("PikPak returned an invalid page token")
         if not files:
             return RemotePage([])
         if next_marker is not None and next_marker == marker:
@@ -346,10 +344,10 @@ class PikPakProvider:
             },
         )
         if payload.get("share_status") != "OK":
-            raise ProviderRequestError("PikPak share is unavailable; check its password or expiry")
+            raise PikPakRequestError("PikPak share is unavailable; check its password or expiry")
         token = payload.get("pass_code_token", "")
         if not isinstance(token, str):
-            raise ProviderRequestError("PikPak share authorization is invalid")
+            raise PikPakRequestError("PikPak share authorization is invalid")
         self._share_tokens[share_id] = token
         self._share_passwords[share_id] = password or ""
         self._share_root_pages[share_id] = payload
@@ -358,7 +356,7 @@ class PikPakProvider:
 
     def _share_token(self, share: ShareInfo) -> str:
         if share.share_key not in self._share_tokens:
-            raise ProviderRequestError("Resolve the PikPak share before accessing its files")
+            raise PikPakRequestError("Resolve the PikPak share before accessing its files")
         return self._share_tokens[share.share_key]
 
     async def list_share_items(
@@ -384,7 +382,7 @@ class PikPakProvider:
                 },
             )
             if payload.get("share_status") != "OK":
-                raise ProviderRequestError(
+                raise PikPakRequestError(
                     "PikPak share is unavailable; check its password or expiry"
                 )
             return self._page(payload, marker)
@@ -455,28 +453,40 @@ class PikPakProvider:
     async def find_target_item(self, target: FolderRef, name: str) -> RemoteItem | None:
         matches = [item async for item in self._items(target) if item.filename == name]
         if len(matches) > 1:
-            raise ProviderRequestError("PikPak target contains ambiguous duplicate names")
+            raise PikPakRequestError("PikPak target contains ambiguous duplicate names")
         if matches and matches[0].metadata.get("phase") not in (None, "PHASE_TYPE_COMPLETE"):
-            raise ProviderRequestError("PikPak target item is not complete yet")
+            raise PikPakRequestError("PikPak target item is not complete yet")
         return matches[0] if matches else None
+
+    def validate_existing_item(self, source: RemoteItem, existing: RemoteItem) -> None:
+        if (
+            not source.content_hash
+            or source.size is None
+            or self._fingerprint(source) != self._fingerprint(existing)
+            or existing.metadata.get("phase") != "PHASE_TYPE_COMPLETE"
+        ):
+            raise PikPakRequestError(
+                "PikPak target name exists but its complete fingerprint does not match; "
+                "reconcile the target file before retrying"
+            )
 
     async def resolve_target_path(self, path: str) -> FolderRef:
         current = FolderRef("root", "/")
         for segment in filter(None, path.split("/")):
             item = await self.find_target_item(current, segment)
             if item is None or item.item_type != "folder":
-                raise ProviderRequestError("PikPak target folder does not exist")
+                raise PikPakRequestError("PikPak target folder does not exist")
             current = FolderRef(item.remote_file_id, f"{current.path.rstrip('/')}/{segment}")
         return current
 
     async def ensure_folder(self, parent: FolderRef, name: str) -> FolderRef:
         if not name or name in (".", "..") or "/" in name or "\x00" in name:
-            raise ProviderRequestError("Invalid PikPak folder name")
+            raise PikPakRequestError("Invalid PikPak folder name")
         existing = await self.find_target_item(parent, name)
         path = f"{parent.path.rstrip('/')}/{name}"
         if existing:
             if existing.item_type != "folder":
-                raise ProviderRequestError("PikPak target name is occupied by a file")
+                raise PikPakRequestError("PikPak target name is occupied by a file")
             return FolderRef(existing.remote_file_id, path)
         payload = await self._request(
             "POST",
@@ -490,7 +500,7 @@ class PikPakProvider:
         )
         try:
             item = self._item(payload.get("file"))
-        except ProviderRequestError:
+        except PikPakRequestError:
             raise ProviderWriteUncertainError(
                 "PikPak folder creation result is incomplete"
             ) from None
@@ -530,10 +540,10 @@ class PikPakProvider:
         encoded = base64.urlsafe_b64encode(target_id.encode()).decode().rstrip("=")
         operation_id = f"pikpak1.{encoded}.{self._fingerprint(source)}"
         if len(operation_id) > 255:
-            raise ProviderRequestError("PikPak target ID is too long")
+            raise PikPakRequestError("PikPak target ID is too long")
         existing = await self.find_target_item(target, source.filename)
         if existing is not None:
-            raise ProviderRequestError("PikPak target name already exists; reconcile before saving")
+            raise PikPakRequestError("PikPak target name already exists; reconcile before saving")
         payload = await self._request(
             "POST",
             "/drive/v1/share/restore",
@@ -551,13 +561,13 @@ class PikPakProvider:
     async def query_save_operation(self, operation_id: str) -> SaveOperation:
         parts = operation_id.split(".")
         if len(parts) != 3 or parts[0] != "pikpak1" or not re.fullmatch(r"[0-9a-f]{64}", parts[2]):
-            raise ProviderRequestError("Invalid PikPak operation ID")
+            raise PikPakRequestError("Invalid PikPak operation ID")
         try:
             target_id = base64.b64decode(
                 parts[1] + "=" * (-len(parts[1]) % 4), altchars=b"-_", validate=True
             ).decode()
         except (ValueError, UnicodeError):
-            raise ProviderRequestError("Invalid PikPak operation ID") from None
+            raise PikPakRequestError("Invalid PikPak operation ID") from None
         self._parent(target_id)
         matches = [
             item
@@ -621,11 +631,11 @@ class PikPakProvider:
 
     async def get_download_url(self, file_id: str) -> str:
         if not _ID.fullmatch(file_id):
-            raise ProviderRequestError("Invalid PikPak file ID")
+            raise PikPakRequestError("Invalid PikPak file ID")
         payload = await self._request("GET", f"/drive/v1/files/{file_id}")
         url = payload.get("web_content_link")
         if not isinstance(url, str) or not url:
-            raise ProviderRequestError("PikPak file has no download link")
+            raise PikPakRequestError("PikPak file has no download link")
         return url
 
     def consume_refresh_token_update(self) -> str | None:

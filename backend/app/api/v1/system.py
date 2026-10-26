@@ -1,13 +1,15 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminUser, DbSession
 from app.core.config import get_settings
 from app.models import CloudFile, FolderCheckpoint, Subscription, Task
 from app.providers import list_provider_types
 from app.repositories import ActiveUpdateOperationConflictError, UpdateOperationRepository
+from app.schemas.task import TaskRead
 from app.schemas.update import UpdateInstallRequest, UpdateOperationInfo, UpdateStatusRead
 from app.services.docker_capability_service import get_docker_capability_service
 from app.services.update_check_service import get_update_check_service, parse_version
@@ -165,8 +167,60 @@ def _terminal_operation_matches_current_version(
 def dashboard_summary(db: DbSession, _: AdminUser) -> dict[str, object]:
     settings = get_settings()
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    recent_tasks = list(db.scalars(select(Task).order_by(Task.created_at.desc()).limit(6)))
+    recent_tasks = list(
+        db.scalars(
+            select(Task).options(selectinload(Task.runs)).order_by(Task.created_at.desc()).limit(6)
+        )
+    )
+    # Each scope's latest attempt supersedes its historical failures. Download
+    # destinations remain independent, even when they reference the same file.
+    latest = select(func.max(Task.id)).group_by(
+        Task.type,
+        Task.subscription_id,
+        Task.file_id,
+        Task.payload["root"].as_string(),
+        Task.payload["relative_path"].as_string(),
+    )
+    current = [
+        Task.id.in_(latest),
+        or_(Task.subscription_id.is_(None), Subscription.enabled.is_(True)),
+    ]
+
+    def issue_count(*conditions):
+        return (
+            db.scalar(
+                select(func.count())
+                .select_from(Task)
+                .outerjoin(Subscription)
+                .outerjoin(CloudFile, Task.file_id == CloudFile.id)
+                .where(*current, *conditions)
+            )
+            or 0
+        )
+
+    failed_files = (
+        db.scalar(
+            select(func.count())
+            .select_from(CloudFile)
+            .where(
+                CloudFile.status == "failed",
+                CloudFile.item_type == "file",
+            )
+        )
+        or 0
+    )
+    scan_issues = issue_count(Task.type == "scan", Task.status == "failed")
+    download_issues = issue_count(Task.type == "download", Task.status == "failed")
+    waiting_credentials = issue_count(
+        Task.status == "waiting_credential",
+        or_(Task.type != "transfer", CloudFile.status.not_in(["saved", "failed"])),
+    )
     return {
+        "failed_files": failed_files,
+        "scan_issues": scan_issues,
+        "download_issues": download_issues,
+        "waiting_credentials": waiting_credentials,
+        "current_issues": failed_files + scan_issues + download_issues + waiting_credentials,
         "subscriptions": db.scalar(select(func.count()).select_from(Subscription)) or 0,
         "active_subscriptions": db.scalar(
             select(func.count()).select_from(Subscription).where(Subscription.enabled.is_(True))
@@ -215,7 +269,7 @@ def dashboard_summary(db: DbSession, _: AdminUser) -> dict[str, object]:
                 "id": task.id,
                 "type": task.type,
                 "status": task.status,
-                "message": task.message,
+                "message": TaskRead.from_task(task).message,
                 "subscription_name": task.subscription.name if task.subscription else None,
                 "created_at": task.created_at,
             }

@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -8,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import AdminUser, DbSession
 from app.core.config import get_settings
 from app.models import CloudFile, Subscription, Task
+from app.repositories import TaskRepository
 from app.services.download_service import DownloadError, destination_path
 from app.services.download_settings import (
     default_download_root,
@@ -16,6 +18,28 @@ from app.services.download_settings import (
 )
 
 router = APIRouter(prefix="/downloads", tags=["downloads"])
+
+
+def _create_download(db, file, root, relative, *, predecessor_id=0):
+    stat = root.stat()
+    location = hashlib.sha256(f"{root}\0{relative}".encode()).hexdigest()
+    return TaskRepository(db).create_task(
+        Task(
+            type="download",
+            trigger_type="retry" if predecessor_id else "manual",
+            status="pending",
+            account_id=file.subscription.cloud_account_id,
+            subscription_id=file.subscription_id,
+            file_id=file.id,
+            payload={
+                "relative_path": relative,
+                "root": str(root),
+                "root_identity": [stat.st_dev, stat.st_ino],
+            },
+            idempotency_key=f"download:{file.id}:{location}:{predecessor_id}",
+            message=f"等待下载 → {relative}",
+        )
+    )
 
 
 class DownloadRequest(BaseModel):
@@ -130,7 +154,9 @@ def enqueue_downloads(payload: DownloadRequest, db: DbSession, _: AdminUser):
             select(Task).where(
                 Task.file_id.in_(batch),
                 Task.type == "download",
-                Task.status.in_(["pending", "running", "retry", "cancel_requested"]),
+                Task.status.in_(
+                    ["pending", "running", "retry", "cancel_requested", "waiting_credential"]
+                ),
             )
         ):
             active_by_file.setdefault(task.file_id, []).append(task)
@@ -170,18 +196,26 @@ def enqueue_downloads(payload: DownloadRequest, db: DbSession, _: AdminUser):
             None,
         )
         if task is None:
-            task = Task(
-                type="download",
-                trigger_type="manual",
-                status="pending",
-                account_id=file.subscription.cloud_account_id,
-                subscription_id=file.subscription_id,
-                file_id=file.id,
-                payload={"relative_path": relative, "root": str(root)},
-                message=f"等待下载 → {relative}",
+            previous = db.scalars(
+                select(Task)
+                .where(
+                    Task.file_id == file.id,
+                    Task.type == "download",
+                )
+                .order_by(Task.id.desc())
             )
-            db.add(task)
-            db.flush()
+            predecessor = next(
+                (
+                    x
+                    for x in previous
+                    if x.payload.get("root") == str(root)
+                    and x.payload.get("relative_path") == relative
+                ),
+                None,
+            )
+            task = _create_download(
+                db, file, root, relative, predecessor_id=predecessor.id if predecessor else 0
+            )
         ids.append(task.id)
     db.commit()
     return {"task_ids": ids}
@@ -192,16 +226,42 @@ def retry_download(task_id: int, db: DbSession, _: AdminUser):
     task = db.get(Task, task_id)
     if not task or task.type != "download":
         raise HTTPException(404, "下载任务不存在")
+    if task.status == "waiting_credential":
+        TaskRepository(db).transition(
+            task.id, expected_status="waiting_credential", target_status="pending"
+        )
+        db.commit()
+        return {"task_id": task.id}
     if task.status not in ("failed", "cancelled"):
         raise HTTPException(409, "只能重试失败或已取消的下载")
-    task.status = "pending"
-    task.message = "等待重新下载"
-    task.error_code = task.last_error_code = task.last_error_message = None
-    task.next_attempt_at = task.finished_at = task.completed_at = None
-    task.cancel_requested_at = None
-    task.retry_count = 0
+    try:
+        root = validate_directory(str(task.payload["root"]))
+    except (ValueError, KeyError):
+        raise HTTPException(400, "下载目录不可用，请检查 NAS 挂载后重试") from None
+    active = db.scalars(
+        select(Task).where(
+            Task.file_id == task.file_id,
+            Task.type == "download",
+            Task.status.in_(
+                ["pending", "running", "retry", "waiting_credential", "cancel_requested"]
+            ),
+        )
+    )
+    successor = next(
+        (
+            x
+            for x in active
+            if x.payload.get("root") == str(root)
+            and x.payload.get("relative_path") == task.payload["relative_path"]
+        ),
+        None,
+    )
+    if successor is None:
+        successor = _create_download(
+            db, task.file, root, task.payload["relative_path"], predecessor_id=task.id
+        )
     db.commit()
-    return {"task_id": task.id}
+    return {"task_id": successor.id}
 
 
 @router.post("/{task_id}/cancel", status_code=202)
@@ -210,13 +270,13 @@ def cancel_download(task_id: int, db: DbSession, _: AdminUser):
     if not task or task.type != "download":
         raise HTTPException(404, "下载任务不存在")
     if task.status == "running":
-        from app.models.base import utcnow
-
-        task.status = "cancel_requested"
-        task.cancel_requested_at = utcnow()
-    elif task.status in ("pending", "retry"):
-        task.status = "cancelled"
-        task.message = "下载已取消"
+        TaskRepository(db).transition(
+            task.id, expected_status="running", target_status="cancel_requested"
+        )
+    elif task.status in ("pending", "retry", "waiting_credential"):
+        TaskRepository(db).transition(
+            task.id, expected_status=task.status, target_status="cancelled"
+        )
     else:
         raise HTTPException(409, "当前下载不能取消")
     db.commit()

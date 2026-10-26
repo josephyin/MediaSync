@@ -4,7 +4,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -294,6 +294,8 @@ class WorkerRuntime:
                 task is None
                 or task.locked_by != self._worker_id
                 or task.lock_token != claimed.lock_token
+                or task.lease_until is None
+                or task.lease_until.replace(tzinfo=UTC) <= self._clock()
             ):
                 raise TaskOwnershipLostError(
                     claimed.invocation.task_id,
@@ -348,6 +350,8 @@ class WorkerRuntime:
                     self._worker_id,
                 )
             expected_status = task.status
+            if expected_status == "cancel_requested" and outcome.status == "deferred":
+                outcome = TaskOutcome(status="cancelled", summary="下载已取消，进度已保留")
             if expected_status == "cancel_requested" and outcome.status not in {
                 "success",
                 "cancelled",
@@ -360,7 +364,13 @@ class WorkerRuntime:
             run_status = outcome.status
             consume_retry_budget = outcome.status in {"retry", "failed"}
             next_attempt_at = None
-            if outcome.status == "retry":
+            if outcome.status == "deferred":
+                task_status = "pending"
+                run_status = "success"
+                next_attempt_at = now + (outcome.retry_after or timedelta(seconds=1))
+                if not outcome.metrics or outcome.metrics.get("continuation") is not True:
+                    raise InvalidTaskOutcomeError("deferred outcome requires continuation metrics")
+            elif outcome.status == "retry":
                 next_retry_count = task.retry_count + 1
                 if next_retry_count > task.max_retries:
                     task_status = "failed"

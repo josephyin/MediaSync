@@ -117,6 +117,9 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
             <el-option label="执行中" value="running" />
             <el-option label="成功" value="success" />
             <el-option label="失败" value="failed" />
+            <el-option label="等待重试" value="retry" />
+            <el-option label="等待凭证" value="waiting_credential" />
+            <el-option label="已取消" value="cancelled" />
           </el-select>
         </div>
         <el-button text @click="clearFilters">重置筛选</el-button>
@@ -137,8 +140,8 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
           <el-table-column label="重试" width="90"><template #default="scope">{{ scope.row.retry_count }}/{{ scope.row.max_retries }}</template></el-table-column>
           <el-table-column label="创建时间" width="160"><template #default="scope"><el-tooltip :content="formatDateTime(scope.row.created_at)"><span>{{ formatRelativeTime(scope.row.created_at) }}</span></el-tooltip></template></el-table-column>
           <el-table-column label="操作" width="150" fixed="right"><template #default="scope"><el-button link type="primary" @click="openDetail(scope.row)">详情</el-button>
-            <el-button v-if="scope.row.type === 'download' && ['failed', 'cancelled'].includes(scope.row.status)" link type="primary" @click="downloadAction(scope.row, 'retry')">重试下载</el-button>
-            <el-button v-if="scope.row.type === 'download' && ['pending', 'running', 'retry'].includes(scope.row.status)" link @click="downloadAction(scope.row, 'cancel')">取消</el-button></template></el-table-column>
+            <el-button v-if="scope.row.type === 'download' && ['failed', 'cancelled', 'waiting_credential'].includes(scope.row.status)" link type="primary" @click="downloadAction(scope.row, 'retry')">{{ scope.row.status === 'waiting_credential' ? '更新凭证后继续' : '重试下载' }}</el-button>
+            <el-button v-if="scope.row.type === 'download' && ['pending', 'running', 'retry', 'waiting_credential'].includes(scope.row.status)" link @click="downloadAction(scope.row, 'cancel')">取消</el-button></template></el-table-column>
         </el-table>
         <div v-if="!loading && !tasks.length" class="empty-state">
           <span class="empty-state__icon"><AppIcon name="tasks" /></span>

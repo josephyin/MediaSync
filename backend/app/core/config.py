@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     scheduler_batch_size: int = Field(default=100, ge=1, le=1000)
     download_settings_path: str = "./data/download-settings.json"
     download_root: str = "./data/downloads"
+    download_rate_limit_kib: int = Field(default=0, ge=0, le=1048576)
+    download_chunk_bytes: int = Field(
+        default=32 * 1024 * 1024, ge=1024 * 1024, le=256 * 1024 * 1024
+    )
     transfer_poll_seconds: int = 10
     transfer_batch_size: int = 2
     transfer_retry_base_seconds: int = Field(default=30, ge=5, le=3600)
@@ -78,13 +82,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_worker_settings(self) -> "Settings":
         if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
-            raise ValueError(
-                "worker_heartbeat_seconds must be shorter than worker_lease_seconds"
-            )
+            raise ValueError("worker_heartbeat_seconds must be shorter than worker_lease_seconds")
         if self.worker_retry_max_seconds < self.worker_retry_base_seconds:
             raise ValueError(
-                "worker_retry_max_seconds must not be shorter than "
-                "worker_retry_base_seconds"
+                "worker_retry_max_seconds must not be shorter than worker_retry_base_seconds"
             )
         return self
 

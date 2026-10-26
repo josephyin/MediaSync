@@ -28,6 +28,48 @@ def file(file_id="source", **overrides):
     }
 
 
+@pytest.mark.parametrize("matches", [False, True])
+async def test_existing_target_requires_complete_matching_fingerprint(matches):
+    def respond(request):
+        if request.url.path == "/drive/v1/share":
+            return httpx.Response(200, json={"share_status": "OK", "pass_code_token": "secret"})
+        if request.url.path == "/drive/v1/files":
+            return httpx.Response(
+                200,
+                json={
+                    "files": [
+                        file(
+                            "existing",
+                            parent_id="",
+                            hash="sha1-content" if matches else "other-content",
+                        )
+                    ]
+                },
+            )
+        raise AssertionError("Existing files must never cause another restore request")
+
+    adapter, client, _requests = provider(respond)
+    spec = TransferSpec(
+        "https://mypikpak.com/s/share",
+        None,
+        "/",
+        "source",
+        None,
+        "movie.mkv",
+        "movie.mkv",
+        "file",
+        42,
+        "sha1-content",
+    )
+    async with client:
+        if matches:
+            result = await execute_transfer(adapter, spec)
+            assert result.already_existed and result.target_file_id == "existing"
+        else:
+            with pytest.raises(ProviderRequestError, match="fingerprint"):
+                await execute_transfer(adapter, spec)
+
+
 def provider(handler, credential="private-refresh"):
     requests = []
 

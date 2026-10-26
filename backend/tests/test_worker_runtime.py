@@ -66,9 +66,7 @@ def load_task_and_runs(
         task = session.get(Task, task_id)
         runs = list(
             session.scalars(
-                select(TaskRun)
-                .where(TaskRun.task_id == task_id)
-                .order_by(TaskRun.run_number)
+                select(TaskRun).where(TaskRun.task_id == task_id).order_by(TaskRun.run_number)
             )
         )
         assert task is not None
@@ -136,6 +134,24 @@ async def test_successful_handler_finishes_task_and_run(
     assert runs[0].status == "success"
     assert runs[0].result_summary == "saved"
     assert runs[0].metrics == {"files": 1}
+
+
+async def test_cancel_at_download_slice_boundary_preserves_terminal_run(sessions):
+    task_id = enqueue(sessions, task_type="download")
+    handlers = TaskHandlerRegistry()
+
+    async def handler(_context):
+        with sessions() as session, session.begin():
+            TaskRepository(session).transition(
+                task_id, expected_status="running", target_status="cancel_requested"
+            )
+        return TaskOutcome(status="deferred", metrics={"continuation": True})
+
+    handlers.register("download", 1, handler)
+    result = await runtime(sessions, handlers).run_once()
+    task, runs = load_task_and_runs(sessions, task_id)
+    assert result.task_status == task.status == "cancelled"
+    assert runs[0].status == "cancelled" and task.retry_count == 0
 
 
 async def test_retryable_outcome_uses_bounded_backoff(
@@ -369,9 +385,7 @@ async def test_stale_worker_cannot_finalize_after_token_changes(
     await handler_started.wait()
     with sessions() as session, session.begin():
         session.execute(
-            update(Task)
-            .where(Task.id == task_id)
-            .values(lock_token="replacement-token")
+            update(Task).where(Task.id == task_id).values(lock_token="replacement-token")
         )
     handler_release.set()
 
@@ -420,9 +434,7 @@ async def test_expired_lease_is_recovered_before_next_claim(
     assert result.task_id == next_task_id
     assert expired_task.status == "retry"
     assert expired_task.retry_count == 1
-    assert expired_task.next_attempt_at == (NOW + timedelta(seconds=10)).replace(
-        tzinfo=None
-    )
+    assert expired_task.next_attempt_at == (NOW + timedelta(seconds=10)).replace(tzinfo=None)
     assert expired_runs[0].id == expired_run_id
     assert expired_runs[0].status == "lost"
     assert next_task.status == "success"

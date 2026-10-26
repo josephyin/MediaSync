@@ -75,7 +75,8 @@ async function saveLocation() {
   finally { locationBusy.value = false }
 }
 function downloadable(file: CloudFile) {
-  return file.status === 'saved' && subscriptions.value.find(s => s.id === file.subscription_id)?.provider === 'pikpak'
+  return file.status === 'saved' && file.item_type === 'file' && !!file.target_file_id
+    && subscriptions.value.find(s => s.id === file.subscription_id)?.provider === 'pikpak'
 }
 async function openDownload(items: {id: number}[]) {
   downloadFiles.value = items
@@ -361,7 +362,7 @@ onMounted(async () => {
           <el-input v-model="downloadDirectory" placeholder="例如：电影 / 本次下载" />
         </el-form-item>
       </el-form>
-      <p class="muted">不覆盖同名文件。失败后可在任务中心重试；重试会重新下载整个文件。</p>
+      <p class="muted">不覆盖已有文件。中断保留进度，重试可断点继续；内容校验失败时重新下载。</p>
       <template #footer>
         <el-button @click="downloadVisible = false">取消</el-button>
         <el-button type="primary" :loading="downloading" :disabled="!downloadAvailable" @click="submitDownload">加入下载队列</el-button>
