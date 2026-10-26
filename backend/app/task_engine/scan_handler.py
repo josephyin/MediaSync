@@ -15,6 +15,7 @@ from app.core.exceptions import (
 )
 from app.models import CloudAccount, Subscription
 from app.providers import get_provider
+from app.providers.aliyundrive.errors import AliyunRequestError
 from app.providers.base import CloudDriveProvider
 from app.services.account_service import get_decrypted_token, persist_provider_token
 from app.services.scan_service import (
@@ -306,18 +307,24 @@ class ScanTaskHandler:
         credential_provider_error = isinstance(
             exc, ProviderRequestError
         ) and any(marker in message for marker in _CREDENTIAL_ERROR_MARKERS)
-        if credential_value_error or credential_provider_error:
+        if credential_value_error or credential_provider_error or (
+            isinstance(exc, AliyunRequestError) and exc.credential_invalid
+        ):
             return _FailureDisposition(
                 status="waiting_credential",
                 error_code="CREDENTIAL_INVALID",
-                safe_message="cloud-drive credential is invalid or expired",
+                safe_message=(str(exc) if isinstance(exc, AliyunRequestError)
+                              else "cloud-drive credential is invalid or expired"),
                 blocked_reason="cloud-drive credential requires user action",
             )
         if isinstance(exc, ProviderRequestError):
             return _FailureDisposition(
                 status="retry",
                 error_code=exc.code,
-                safe_message="cloud-drive scan request failed and can be retried",
+                safe_message=(
+                    str(exc) if isinstance(exc, AliyunRequestError)
+                    else "cloud-drive scan request failed and can be retried"
+                ),
             )
         if isinstance(exc, ProviderError):
             return _FailureDisposition(

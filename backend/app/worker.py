@@ -70,7 +70,10 @@ def build_handler_registry(
 
         session_factory = SessionLocal
 
+    from app.services.download_service import DownloadTaskHandler
+
     registry = TaskHandlerRegistry()
+    registry.register("download", 1, DownloadTaskHandler(session_factory))
     registry.register("scan", 1, ScanTaskHandler(session_factory=session_factory))
     registry.register(
         "transfer",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.exceptions import ProviderRequestError, ProviderWriteUncertainError
 from app.models import Base, CloudAccount, CloudFile, Subscription, Task, TaskRun
+from app.providers.aliyundrive.errors import AliyunRequestError
 from app.providers.base import (
     FolderRef,
     RemoteItem,
@@ -559,7 +561,68 @@ async def test_exhausted_transfer_retry_marks_file_failed(
 
     assert outcome.status == "retry"
     assert file.status == "failed"
-    assert file.last_error == "cloud-drive request failed and can be retried"
+    assert file.last_error == "cloud-drive request failed; automatic retries exhausted"
+    assert outcome.error_message == file.last_error
+
+
+@pytest.mark.parametrize(
+    ("method", "stage", "path"),
+    [
+        ("resolve_share", "resolve share", "/v2/share_link/get_share_token"),
+        ("ensure_folder", "prepare target directory", "/adrive/v2/file/createWithFolders"),
+        ("find_target_item", "check existing target file", "/v2/file/list"),
+        ("save_shared_item", "copy shared file", "/v2/file/copy"),
+    ],
+)
+async def test_aliyun_failure_step_is_persisted_and_logged_safely(
+    sessions, caplog, monkeypatch, method, stage, path,
+) -> None:
+    # Migration tests may disable pre-existing loggers via Alembic fileConfig.
+    monkeypatch.setattr(logging.getLogger("app.task_engine.transfer_handler"), "disabled", False)
+    caplog.set_level(logging.WARNING, logger="app.task_engine.transfer_handler")
+    task_id, subscription_id, file_id = seed_transfer(sessions)
+    provider = FakeTransferProvider()
+
+    async def reject(*_args):
+        raise AliyunRequestError(
+            path=path, failure="rejected", http_status=403,
+            provider_code="DeviceSessionSignatureInvalid",
+        )
+
+    setattr(provider, method, reject)
+    outcome = await handler(sessions, provider)(context(
+        task_id=task_id, subscription_id=subscription_id, file_id=file_id,
+        retry_count=3, max_retries=3,
+    ))
+    _task, file, _count = load_state(sessions, task_id, file_id)
+    assert outcome.error_code == "ALIYUN_REQUEST_FAILED"
+    assert f"Transfer step: {stage}" in outcome.error_message
+    assert "HTTP 403" in outcome.error_message
+    assert "DeviceSessionSignatureInvalid" in outcome.error_message
+    assert outcome.error_message.endswith("automatic retries exhausted")
+    assert "can be retried" not in outcome.error_message
+    assert file.last_error == outcome.error_message
+    assert file.status == "failed"
+    assert f"task_id={task_id}" in caplog.text
+    assert outcome.error_message in caplog.text
+    assert "encrypted" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "code", ["InvalidGrant", "AccessTokenExpired", "InvalidParameter.RefreshToken"],
+)
+async def test_aliyun_auth_failure_requires_credential_action(sessions, code) -> None:
+    task_id, subscription_id, file_id = seed_transfer(sessions)
+    error = AliyunRequestError(
+        path="/v2/account/token", failure="rejected", http_status=401, provider_code=code,
+    )
+    outcome = await handler(sessions, FakeTransferProvider(resolve_error=error))(context(
+        task_id=task_id, subscription_id=subscription_id, file_id=file_id,
+    ))
+    assert outcome.status == "waiting_credential"
+    assert outcome.error_code == "CREDENTIAL_INVALID"
+    assert code in outcome.error_message
+    assert "HTTP 401" in outcome.error_message
 
 
 async def test_quark_failure_keeps_sanitized_provider_detail(

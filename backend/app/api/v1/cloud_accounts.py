@@ -5,12 +5,14 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import AdminUser, DbSession
 from app.core.config import get_settings
 from app.core.exceptions import ProviderRequestError
+from app.core.security import get_credential_cipher
 from app.models import CloudAccount
 from app.models.base import utcnow
 from app.providers import get_provider, list_provider_types
 from app.providers.aliyundrive.qr_login import AliyunDriveQrLogin
 from app.providers.baidu.qr_login import BaiduQrLogin
 from app.providers.pan123.qr_login import Pan123QrLogin
+from app.providers.pikpak.login import login_with_password
 from app.providers.quark.qr_login import QuarkQrLogin
 from app.schemas.cloud_account import (
     CloudAccountCreate,
@@ -19,6 +21,7 @@ from app.schemas.cloud_account import (
     DriveInfo,
     FolderItem,
     OpenCredentialConfigure,
+    PikPakLoginRequest,
     QrLoginStartRequest,
     QrLoginStartResponse,
     QrLoginStatusResponse,
@@ -93,6 +96,60 @@ def add_account(payload: CloudAccountCreate, db: DbSession, _: AdminUser) -> Clo
 @router.get("/cloud-accounts/{account_id}", response_model=CloudAccountRead)
 def get_account(account_id: int, db: DbSession, _: AdminUser) -> CloudAccount:
     return _get_account(db, account_id)
+
+
+@router.post("/pikpak/login", response_model=CloudAccountRead, status_code=201)
+async def pikpak_password_login(
+    payload: PikPakLoginRequest,
+    db: DbSession,
+    _: AdminUser,
+) -> CloudAccount:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="请填写账号名称")
+    existing = _get_account(db, payload.account_id) if payload.account_id is not None else None
+    if existing is not None and existing.provider != "pikpak":
+        raise HTTPException(status_code=422, detail="账号不是 PikPak")
+    if (
+        existing is None
+        and db.scalar(select(CloudAccount.id).where(CloudAccount.name == name)) is not None
+    ):
+        raise HTTPException(status_code=409, detail="账号名称已经存在")
+    credential, user_id = await login_with_password(
+        payload.username, payload.password.get_secret_value()
+    )
+    if existing is not None:
+        if existing.provider_user_id and existing.provider_user_id != user_id:
+            raise HTTPException(
+                status_code=409, detail="请使用原 PikPak 账号重新登录，不能替换为其他账号"
+            )
+        existing.refresh_token = get_credential_cipher().encrypt(credential)
+        existing.status = "active"
+        existing.last_error = None
+        existing.last_verified_at = None
+        existing.provider_user_id = user_id
+        db.commit()
+        db.refresh(existing)
+        return existing
+    account = CloudAccount(
+        provider="pikpak",
+        name=name,
+        refresh_token=get_credential_cipher().encrypt(credential),
+        account_identity=f"PikPak {user_id}",
+        provider_user_id=user_id,
+        default_drive_id="root",
+        status="active",
+    )
+    # Sign-in confirms identity, not drive access. The Verify action separately
+    # checks quota/API access and populates last_verified_at.
+    db.add(account)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="账号名称已经存在") from None
+    db.refresh(account)
+    return account
 
 
 @router.patch("/cloud-accounts/{account_id}", response_model=CloudAccountRead)

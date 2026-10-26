@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal
 
@@ -18,6 +19,7 @@ from app.core.exceptions import (
 from app.models import CloudAccount, CloudFile, Task
 from app.models.base import utcnow
 from app.providers import get_provider
+from app.providers.aliyundrive.errors import AliyunRequestError
 from app.providers.base import CloudDriveProvider
 from app.services.account_service import (
     get_decrypted_token,
@@ -34,6 +36,7 @@ from app.services.transfer_operation import (
 from app.task_engine.handlers import TaskExecutionContext, TaskInvocation, TaskOutcome
 
 SessionFactory = Callable[[], Session]
+logger = logging.getLogger(__name__)
 ProviderFactory = Callable[[str, str, str | None], CloudDriveProvider]
 TokenLoader = Callable[[CloudAccount], str]
 TokenPersister = Callable[[CloudAccount, CloudDriveProvider], bool]
@@ -142,7 +145,7 @@ class TransferTaskHandler:
         try:
             source = await asyncio.to_thread(self._load_source, payload)
         except Exception as exc:
-            disposition = self._classify_failure(exc)
+            disposition = self._failure_for_context(exc, context)
             if not isinstance(exc, TransferSourceNotFoundError):
                 await asyncio.to_thread(
                     self._mark_failure,
@@ -153,7 +156,7 @@ class TransferTaskHandler:
                         disposition,
                     ),
                 )
-            return self._outcome_for_failure(disposition)
+            return self._outcome_for_failure(disposition, task_id=context.task.task_id)
 
         await asyncio.to_thread(self._mark_saving, source.file_id)
         provider: CloudDriveProvider | None = None
@@ -235,7 +238,7 @@ class TransferTaskHandler:
                 self._record_provider_uncertain,
                 context.task.task_id,
             )
-        disposition = self._classify_failure(operation_error)
+        disposition = self._failure_for_context(operation_error, context)
         if not token_persisted:
             disposition = _FailureDisposition(
                 status="retry",
@@ -256,7 +259,7 @@ class TransferTaskHandler:
             disposition,
             retry_exhausted=self._retry_exhausted(context, disposition),
         )
-        return self._outcome_for_failure(disposition)
+        return self._outcome_for_failure(disposition, task_id=context.task.task_id)
 
     def _load_source(self, payload: TransferPayloadV1) -> _TransferSource:
         with self._session_factory() as session:
@@ -426,6 +429,21 @@ class TransferTaskHandler:
         )
 
     @staticmethod
+    def _failure_for_context(
+        exc: Exception, context: TaskExecutionContext,
+    ) -> _FailureDisposition:
+        disposition = TransferTaskHandler._classify_failure(exc)
+        if TransferTaskHandler._retry_exhausted(context, disposition):
+            disposition = replace(
+                disposition,
+                safe_message=(
+                    disposition.safe_message.removesuffix(" and can be retried")
+                    + "; automatic retries exhausted"
+                ),
+            )
+        return disposition
+
+    @staticmethod
     def _classify_failure(exc: Exception) -> _FailureDisposition:
         if isinstance(exc, TransferSourceNotFoundError):
             return _FailureDisposition(
@@ -450,11 +468,14 @@ class TransferTaskHandler:
         credential_provider_error = isinstance(
             exc, ProviderRequestError
         ) and any(marker in message for marker in _CREDENTIAL_ERROR_MARKERS)
-        if credential_value_error or credential_provider_error:
+        if credential_value_error or credential_provider_error or (
+            isinstance(exc, AliyunRequestError) and exc.credential_invalid
+        ):
             return _FailureDisposition(
                 status="waiting_credential",
                 error_code="CREDENTIAL_INVALID",
-                safe_message="cloud-drive credential is invalid or expired",
+                safe_message=(str(exc) if isinstance(exc, AliyunRequestError)
+                              else "cloud-drive credential is invalid or expired"),
                 blocked_reason="cloud-drive credential requires user action",
             )
         if isinstance(exc, ProviderRequestError):
@@ -468,9 +489,15 @@ class TransferTaskHandler:
                 )
             safe_message = (
                 str(exc)
-                if exc.code.startswith(("QUARK_", "PAN123_"))
+                if isinstance(exc, AliyunRequestError) or exc.code.startswith(("QUARK_", "PAN123_"))
                 else "cloud-drive request failed and can be retried"
             )
+            stage = getattr(exc, "transfer_stage", None)
+            if isinstance(exc, AliyunRequestError) and stage in {
+                "resolve share", "prepare target directory", "check existing target file",
+                "submit shared file copy", "check copy result", "copy shared file",
+            }:
+                safe_message = f"Transfer step: {stage}; {safe_message}"
             return _FailureDisposition(
                 status="retry",
                 error_code=exc.code,
@@ -489,7 +516,13 @@ class TransferTaskHandler:
         )
 
     @staticmethod
-    def _outcome_for_failure(disposition: _FailureDisposition) -> TaskOutcome:
+    def _outcome_for_failure(
+        disposition: _FailureDisposition, *, task_id: int | None = None,
+    ) -> TaskOutcome:
+        logger.warning(
+            "transfer_failed task_id=%s status=%s error_code=%s detail=%s",
+            task_id, disposition.status, disposition.error_code, disposition.safe_message,
+        )
         if disposition.status == "waiting_credential":
             return TaskOutcome(
                 status="waiting_credential",

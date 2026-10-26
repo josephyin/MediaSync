@@ -14,6 +14,7 @@ MediaSync 是一个通用的家庭影音云盘订阅同步工具。它定时检�
 - ✅ 夸克网盘（扫码 Cookie 覆盖完整转存；OpenAPI 可选，实验性）
 - ✅ 123 云盘（扫码私有登录；自有 OpenAPI 可选，实验性）
 - ✅ 百度网盘（扫码私有登录 + AListGo/OpenList/自有 OpenAPI，实验性）
+- 🧪 PikPak（当前源码新增：Refresh Token、目录浏览、分享订阅转存；尚待真实账号验收，未包含在 v0.2.1 镜像中；[接入说明](docs/operations/pikpak.md)）
 - ⬜ 115
 - ⬜ OneDrive
 

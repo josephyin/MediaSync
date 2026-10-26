@@ -20,6 +20,7 @@ export function providerMark(providers: ProviderInfo[], providerId: string): str
   if (providerId === 'quark') return '夸'
   if (providerId === 'pan123') return '123'
   if (providerId === 'baidu') return '百'
+  if (providerId === 'pikpak') return 'Pik'
   return name.slice(0, 3)
 }
 

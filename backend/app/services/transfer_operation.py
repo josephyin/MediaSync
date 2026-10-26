@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 
 from app.core.exceptions import (
     ProviderOperationPendingError,
+    ProviderRequestError,
     ProviderWriteUncertainError,
 )
 from app.providers.base import (
@@ -58,6 +59,14 @@ async def _ignore_operation(_operation_id: str) -> None:
     return None
 
 
+async def _provider_step[T](stage: str, request: Awaitable[T]) -> T:
+    try:
+        return await request
+    except ProviderRequestError as exc:
+        exc.transfer_stage = stage
+        raise
+
+
 async def ensure_target_folder(
     provider: CloudDriveProvider,
     root_path: str,
@@ -88,15 +97,20 @@ async def execute_transfer(
     if await cancellation_requested():
         raise TransferCancelledError("transfer cancelled before provider access")
 
-    share = await provider.resolve_share(spec.share_url, spec.share_password)
-    target = await ensure_target_folder(
-        provider,
-        spec.target_path,
-        spec.relative_path,
-        cancellation_requested=cancellation_requested,
+    share = await _provider_step(
+        "resolve share", provider.resolve_share(spec.share_url, spec.share_password),
+    )
+    target = await _provider_step(
+        "prepare target directory",
+        ensure_target_folder(
+            provider, spec.target_path, spec.relative_path,
+            cancellation_requested=cancellation_requested,
+        ),
     )
     if provider_operation_id is None:
-        existing = await provider.find_target_item(target, spec.filename)
+        existing = await _provider_step(
+            "check existing target file", provider.find_target_item(target, spec.filename),
+        )
         if existing is not None:
             return TransferOperationResult(
                 target_file_id=existing.remote_file_id,
@@ -118,14 +132,18 @@ async def execute_transfer(
         operation_id = provider_operation_id
         if operation_id is None:
             await record_write_intent()
-            operation_id = await provider.start_save_shared_item(share, source, target)
+            operation_id = await _provider_step(
+                "submit shared file copy", provider.start_save_shared_item(share, source, target),
+            )
             try:
                 await record_provider_operation(operation_id)
             except Exception as exc:
                 raise ProviderWriteUncertainError(
                     "cloud-drive operation was accepted but its ID was not persisted"
                 ) from exc
-        operation = await provider.query_save_operation(operation_id)
+        operation = await _provider_step(
+            "check copy result", provider.query_save_operation(operation_id),
+        )
         if not operation.completed:
             raise ProviderOperationPendingError(
                 "cloud-drive save operation is still pending"
@@ -139,7 +157,9 @@ async def execute_transfer(
             target_path=str(PurePosixPath(target.path) / spec.filename),
         )
     else:
-        result = await provider.save_shared_item(share, source, target)
+        result = await _provider_step(
+            "copy shared file", provider.save_shared_item(share, source, target),
+        )
     return TransferOperationResult(
         target_file_id=result.target_file_id,
         target_path=result.target_path,

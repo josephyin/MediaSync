@@ -20,6 +20,41 @@ const dialog = ref(false)
 const loading = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive({ provider: 'aliyundrive', name: '', refresh_token: '' })
+const pikpakLoginDialog = ref(false)
+const pikpakLoginLoading = ref(false)
+const pikpakLoginError = ref('')
+const pikpakLoginAccountId = ref<number | null>(null)
+const pikpakLoginForm = reactive({ name: '', username: '', password: '' })
+
+async function loginPikPak() {
+  if (pikpakLoginLoading.value) return
+  if (!pikpakLoginForm.name.trim() || !pikpakLoginForm.username.trim() || !pikpakLoginForm.password) {
+    pikpakLoginError.value = '请填写账号名称、PikPak 账号和密码'
+    return
+  }
+  pikpakLoginLoading.value = true
+  pikpakLoginError.value = ''
+  const body = JSON.stringify({ ...pikpakLoginForm, account_id: pikpakLoginAccountId.value })
+  pikpakLoginForm.password = ''
+  try {
+    await api('/pikpak/login', { method: 'POST', body })
+    pikpakLoginDialog.value = false
+    ElMessage.success('PikPak 登录成功，已自动保存凭证')
+    await load()
+  } catch (error) {
+    pikpakLoginError.value = error instanceof Error ? error.message : 'PikPak 登录失败，请重试'
+  } finally {
+    pikpakLoginLoading.value = false
+    pikpakLoginForm.password = ''
+  }
+}
+
+function reloginPikPak(account: CloudAccount) {
+  pikpakLoginAccountId.value = account.id
+  Object.assign(pikpakLoginForm, { name: account.name, username: '', password: '' })
+  pikpakLoginError.value = ''
+  pikpakLoginDialog.value = true
+}
 
 const addDialog = ref(false)
 const addStep = ref<1 | 2>(1)
@@ -41,6 +76,16 @@ interface GuidedLoginOption {
 }
 
 const guidedLoginOptions: Record<string, GuidedLoginOption> = {
+  pikpak: {
+    provider: 'pikpak',
+    title: '使用 PikPak 账号密码登录',
+    description: '自动获取并加密保存 Token，无需手工复制。',
+    action: '登录账号',
+    state: 'available',
+    icon: 'browser',
+    privatePurpose: '浏览目录、读取分享并自动转存（实验性）',
+    openApi: 'none',
+  },
   aliyundrive: {
     provider: 'aliyundrive',
     title: '使用阿里云盘 App 扫码',
@@ -311,6 +356,13 @@ function startGuidedLogin() {
   const option = selectedGuidedOption.value
   if (!option || option.state !== 'available') return
   addDialog.value = false
+  if (option.provider === 'pikpak') {
+    pikpakLoginAccountId.value = null
+    Object.assign(pikpakLoginForm, { name: '', username: '', password: '' })
+    pikpakLoginError.value = ''
+    pikpakLoginDialog.value = true
+    return
+  }
   if (['aliyundrive', 'quark', 'pan123', 'baidu'].includes(option.provider)) {
     openQr(undefined, option.provider as QrProviderId)
   }
@@ -524,7 +576,7 @@ onUnmounted(stopQrPolling)
 <template>
   <section>
     <div class="page-heading">
-      <div><h1>云盘账号</h1><p>扫码或网页授权即可添加账号，MediaSync 会自动处理所需凭证</p></div>
+      <div><h1>云盘账号</h1><p>选择云盘，通过扫码、网页授权或已有凭证添加账号</p></div>
       <div class="page-actions">
         <el-button type="primary" @click="openAdd"><AppIcon name="plus" />添加云盘账号</el-button>
       </div>
@@ -532,7 +584,7 @@ onUnmounted(stopQrPolling)
 
     <div class="connection-banner">
       <span class="connection-banner__icon"><AppIcon name="scan" :size="22" /></span>
-      <div><strong>推荐使用扫码或网页授权</strong><p>不需要打开开发者工具，也不需要复制 Cookie 或 Token。手工凭证仅作为高级备用方式。</p></div>
+      <div><strong>按云盘选择登录方式</strong><p>支持扫码的云盘可扫码授权；PikPak 可使用账号密码自动获取凭证。</p></div>
       <el-button text type="primary" @click="openAdd">选择云盘<AppIcon name="arrow" :size="15" /></el-button>
     </div>
 
@@ -571,6 +623,7 @@ onUnmounted(stopQrPolling)
         <footer class="account-actions">
           <el-button type="primary" plain :disabled="!canVerify(account)" :loading="verifyingId === account.id" @click="verify(account.id)">校验账号</el-button>
           <el-button @click="openEdit(account)">编辑账号</el-button>
+          <el-button v-if="account.provider === 'pikpak'" @click="reloginPikPak(account)">重新登录</el-button>
           <el-dropdown trigger="click">
             <el-button>更多<AppIcon name="arrow" /></el-button>
             <template #dropdown>
@@ -650,6 +703,17 @@ onUnmounted(stopQrPolling)
       </div>
     </el-dialog>
 
+    <el-dialog v-model="pikpakLoginDialog" title="登录 PikPak" width="min(480px, calc(100vw - 32px))" :close-on-click-modal="!pikpakLoginLoading" :close-on-press-escape="!pikpakLoginLoading" :show-close="!pikpakLoginLoading" @closed="pikpakLoginForm.password = ''">
+      <el-form label-position="top" @submit.prevent="loginPikPak">
+        <el-form-item label="账号名称"><el-input v-model="pikpakLoginForm.name" :disabled="pikpakLoginLoading" placeholder="例如：我的 PikPak" maxlength="100" /></el-form-item>
+        <el-form-item label="PikPak 账号"><el-input v-model="pikpakLoginForm.username" :disabled="pikpakLoginLoading" placeholder="邮箱或手机号" autocomplete="username" maxlength="255" /></el-form-item>
+        <el-form-item label="PikPak 密码"><el-input v-model="pikpakLoginForm.password" :disabled="pikpakLoginLoading" type="password" show-password autocomplete="off" @keyup.enter="loginPikPak" /></el-form-item>
+        <p class="form-tip">密码仅用于本机服务向 PikPak 官方接口登录，不会保存到数据库。登录后只加密保存 Token；如需人机验证，会提示你前往官方网页处理。</p>
+        <el-alert v-if="pikpakLoginError" :title="pikpakLoginError" type="error" :closable="false" show-icon />
+      </el-form>
+      <template #footer><el-button :disabled="pikpakLoginLoading" @click="pikpakLoginDialog = false">取消</el-button><el-button type="primary" :loading="pikpakLoginLoading" @click="loginPikPak">登录并添加</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="dialog" :title="editingId ? '编辑云盘账号' : '手动添加账号'" width="min(480px, calc(100vw - 32px))">
       <el-form label-position="top">
         <el-form-item label="Provider">
@@ -668,6 +732,7 @@ onUnmounted(stopQrPolling)
           <el-input v-model="form.refresh_token" type="password" show-password />
           <div v-if="form.provider === 'pan123'" class="form-tip">填写 123 云盘 Web 端 Local Storage 中的 authorToken；凭证会加密保存，请勿发送到聊天或日志。</div>
           <div v-if="form.provider === 'baidu'" class="form-tip">填写百度网盘 Web Cookie 中的 BDUSS；凭证会加密保存，请勿发送到聊天或日志。</div>
+          <div v-if="form.provider === 'pikpak'" class="form-tip">在 PikPak 官方网页登录后，从浏览器开发者工具的登录或刷新请求响应中复制 refresh_token。支持直接填写网页 Refresh Token，或包含 refresh_token、client_id、device_id 的 JSON。凭证会加密保存，请勿发送到聊天或日志。此接入尚待真实账号验证，暂不支持扫码登录。</div>
         </el-form-item>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="loading" @click="save">保存</el-button></template>

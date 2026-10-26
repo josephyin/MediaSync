@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     scheduler_poll_seconds: float = Field(default=10, gt=0, le=300)
     scheduler_batch_size: int = Field(default=100, ge=1, le=1000)
+    download_settings_path: str = "./data/download-settings.json"
+    download_root: str = "./data/downloads"
     transfer_poll_seconds: int = 10
     transfer_batch_size: int = 2
     transfer_retry_base_seconds: int = Field(default=30, ge=5, le=3600)

@@ -19,6 +19,13 @@ const autoRefresh = ref(true)
 const selectedTask = ref<Task | null>(null)
 const drawer = ref(false)
 let timer: number | undefined
+async function downloadAction(task: Task, action: 'retry' | 'cancel') {
+  try {
+    await api(`/downloads/${task.id}/${action}`, { method: 'POST' })
+    ElMessage.success(action === 'retry' ? '已重新加入下载队列' : '已请求取消下载')
+    await load()
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '操作失败') }
+}
 
 function subscriptionName(id: number | null) {
   if (!id) return '系统任务'
@@ -103,6 +110,7 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
           <el-select v-model="type" clearable placeholder="全部任务类型" @change="applyFilters">
             <el-option label="订阅扫描" value="scan" />
             <el-option label="文件转存" value="transfer" />
+            <el-option label="本地下载" value="download" />
           </el-select>
           <el-select v-model="status" clearable placeholder="全部状态" @change="applyFilters">
             <el-option label="等待中" value="pending" />
@@ -128,7 +136,9 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
           <el-table-column label="执行信息" min-width="260" show-overflow-tooltip><template #default="scope">{{ taskMessage(scope.row.message) }}</template></el-table-column>
           <el-table-column label="重试" width="90"><template #default="scope">{{ scope.row.retry_count }}/{{ scope.row.max_retries }}</template></el-table-column>
           <el-table-column label="创建时间" width="160"><template #default="scope"><el-tooltip :content="formatDateTime(scope.row.created_at)"><span>{{ formatRelativeTime(scope.row.created_at) }}</span></el-tooltip></template></el-table-column>
-          <el-table-column label="操作" width="85" fixed="right"><template #default="scope"><el-button link type="primary" @click="openDetail(scope.row)">详情</el-button></template></el-table-column>
+          <el-table-column label="操作" width="150" fixed="right"><template #default="scope"><el-button link type="primary" @click="openDetail(scope.row)">详情</el-button>
+            <el-button v-if="scope.row.type === 'download' && ['failed', 'cancelled'].includes(scope.row.status)" link type="primary" @click="downloadAction(scope.row, 'retry')">重试下载</el-button>
+            <el-button v-if="scope.row.type === 'download' && ['pending', 'running', 'retry'].includes(scope.row.status)" link @click="downloadAction(scope.row, 'cancel')">取消</el-button></template></el-table-column>
         </el-table>
         <div v-if="!loading && !tasks.length" class="empty-state">
           <span class="empty-state__icon"><AppIcon name="tasks" /></span>

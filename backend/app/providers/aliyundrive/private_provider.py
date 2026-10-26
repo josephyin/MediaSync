@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import ProviderRequestError
+from app.providers.aliyundrive.errors import AliyunRequestError
 from app.providers.aliyundrive.request_guard import request_guard
 from app.providers.base import (
     AccountProfile,
@@ -89,10 +89,6 @@ class AliyunDrivePrivateProvider:
             metadata={"drive_id": raw.get("drive_id")},
         )
 
-    @staticmethod
-    def _message(payload: dict[str, object], fallback: str) -> str:
-        return str(payload.get("message") or payload.get("display_message") or fallback)
-
     async def _post_url(
         self,
         url: str,
@@ -102,6 +98,7 @@ class AliyunDrivePrivateProvider:
         share_token: str | None = None,
         retryable: bool = True,
     ) -> dict[str, object]:
+        request_path = urlparse(url).path
         headers = {
             "Content-Type": "application/json",
             "Origin": "https://www.alipan.com",
@@ -142,25 +139,31 @@ class AliyunDrivePrivateProvider:
                     retry_after,
                 )
         except httpx.HTTPError as exc:
-            raise ProviderRequestError(f"Aliyun Drive private API request failed: {exc}") from exc
+            raise AliyunRequestError(
+                path=request_path,
+                failure="timeout" if isinstance(exc, httpx.TimeoutException) else "network",
+            ) from exc
         finally:
             if owns_client:
                 await client.aclose()
 
         if response is None:
-            raise ProviderRequestError("Aliyun Drive private API request was not executed")
+            raise AliyunRequestError(path=request_path, failure="network")
         try:
             payload = response.json()
         except ValueError as exc:
-            raise ProviderRequestError(
-                f"Aliyun Drive private API returned invalid JSON (HTTP {response.status_code})"
+            raise AliyunRequestError(
+                path=request_path, failure="json", http_status=response.status_code,
             ) from exc
         if not isinstance(payload, dict):
-            raise ProviderRequestError("Aliyun Drive private API returned an invalid response")
+            raise AliyunRequestError(
+                path=request_path, failure="response", http_status=response.status_code,
+            )
         if response.is_error or payload.get("code"):
-            code = payload.get("code", response.status_code)
-            message = self._message(payload, response.reason_phrase)
-            raise ProviderRequestError(f"Aliyun Drive private API {code}: {message}")
+            raise AliyunRequestError(
+                path=request_path, failure="rejected", http_status=response.status_code,
+                provider_code=payload.get("code"),
+            )
         return payload
 
     async def _api_post(
@@ -190,7 +193,7 @@ class AliyunDrivePrivateProvider:
         access_token = str(payload.get("access_token", ""))
         rotated_refresh_token = str(payload.get("refresh_token", ""))
         if not access_token:
-            raise ProviderRequestError("Aliyun Drive token response contained no access token")
+            raise AliyunRequestError(path="/v2/account/token", failure="missing_result")
         self._access_token = access_token
         if rotated_refresh_token and rotated_refresh_token != self.refresh_token:
             self.refresh_token = rotated_refresh_token
@@ -230,7 +233,7 @@ class AliyunDrivePrivateProvider:
         payload = await self._api_post("/v2/user/get", {})
         self._remember_account_fields(payload)
         if not self._drive_id:
-            raise ProviderRequestError("Aliyun Drive did not return an available drive ID")
+            raise AliyunRequestError(path="/v2/user/get", failure="missing_result")
 
     async def _get_drive_id(self) -> str:
         if not self._drive_id:
@@ -283,7 +286,9 @@ class AliyunDrivePrivateProvider:
         )
         share_token = str(payload.get("share_token", ""))
         if not share_token:
-            raise ProviderRequestError("Aliyun Drive share response contained no share token")
+            raise AliyunRequestError(
+                path="/v2/share_link/get_share_token", failure="missing_result",
+            )
         self._share_tokens[share_key] = share_token
         return share_token
 
@@ -320,7 +325,10 @@ class AliyunDrivePrivateProvider:
     def _remote_page(cls, payload: dict[str, object], operation: str) -> RemotePage:
         raw_items = payload.get("items", [])
         if not isinstance(raw_items, list):
-            raise ProviderRequestError(f"Aliyun Drive {operation} returned invalid items")
+            raise AliyunRequestError(
+                path="/adrive/v3/file/list" if operation == "share file list" else "/v2/file/list",
+                failure="response",
+            )
         return RemotePage(
             items=[cls._to_remote_item(item) for item in raw_items if isinstance(item, dict)],
             next_marker=(str(payload.get("next_marker") or "") or None) if raw_items else None,
@@ -362,9 +370,7 @@ class AliyunDrivePrivateProvider:
                     break
                 marker = page.next_marker
             if match is None:
-                raise ProviderRequestError(
-                    f"Aliyun Drive target folder does not exist: {normalized}"
-                )
+                raise AliyunRequestError(path="/v2/file/list", failure="missing_directory")
             current = FolderRef(
                 folder_id=match.remote_file_id,
                 path=f"{current.path.rstrip('/')}/{part}",
@@ -407,7 +413,9 @@ class AliyunDrivePrivateProvider:
         )
         folder_id = str(payload.get("file_id", ""))
         if not folder_id:
-            raise ProviderRequestError("Aliyun Drive folder creation returned no file ID")
+            raise AliyunRequestError(
+                path="/adrive/v2/file/createWithFolders", failure="missing_result",
+            )
         return FolderRef(folder_id, f"{parent.path.rstrip('/')}/{name}")
 
     async def find_target_item(self, target: FolderRef, name: str) -> RemoteItem | None:
@@ -436,7 +444,7 @@ class AliyunDrivePrivateProvider:
         )
         target_file_id = str(payload.get("file_id", ""))
         if not target_file_id:
-            raise ProviderRequestError("Aliyun Drive copy returned no target file ID")
+            raise AliyunRequestError(path="/v2/file/copy", failure="missing_result")
         return SaveResult(
             target_file_id=target_file_id,
             target_path=f"{target.path.rstrip('/')}/{source.filename}",
