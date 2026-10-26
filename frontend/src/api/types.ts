@@ -75,8 +75,10 @@ export interface CloudFile {
   subscription_id: number
   filename: string
   relative_path: string
+  item_type: string
   size: number | null
   status: string
+  target_file_id: string | null
   target_path: string | null
   saved_at: string | null
   last_error: string | null

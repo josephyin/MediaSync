@@ -97,6 +97,7 @@ async def run_transfer(db: Session, task: Task) -> None:
         file.saved_at = now
         file.last_error = None
         task.status = "success"
+        task.error_code = None
         if task.provider_operation_id is not None:
             task.provider_operation_status = "succeeded"
             task.provider_result = {

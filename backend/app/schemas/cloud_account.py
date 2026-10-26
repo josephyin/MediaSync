@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+
+class PikPakLoginRequest(BaseModel):
+    account_id: int | None = None
+    name: str = Field(min_length=1, max_length=100)
+    username: str = Field(min_length=1, max_length=255)
+    password: SecretStr
 
 
 class CloudAccountBase(BaseModel):

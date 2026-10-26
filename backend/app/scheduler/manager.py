@@ -53,14 +53,25 @@ def start_scheduler() -> None:
     with SessionLocal() as db:
         stale_tasks = list(db.scalars(select(Task).where(Task.status == "running")))
         for task in stale_tasks:
-            task.status = "pending" if task.type == "transfer" else "failed"
+            task.status = "pending" if task.type in ("transfer", "download") else "failed"
             task.message = "应用重启后已恢复，等待重新执行"
-            if task.type == "transfer":
+            if task.type in ("transfer", "download"):
                 task.next_attempt_at = None
         db.commit()
         subscriptions = list(db.scalars(select(Subscription).where(Subscription.enabled.is_(True))))
         for subscription in subscriptions:
             upsert_subscription_job(subscription)
+    from app.services.download_service import process_pending_downloads
+
+    scheduler.add_job(
+        process_pending_downloads,
+        "interval",
+        seconds=5,
+        id="download-worker",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+    )
     scheduler.add_job(
         process_pending_transfers,
         "interval",

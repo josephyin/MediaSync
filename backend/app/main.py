@@ -3,6 +3,8 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -53,6 +55,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router, prefix=settings.api_prefix)
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_login_validation(request: Request, exc: RequestValidationError):
+    if request.url.path == f"{settings.api_prefix}/pikpak/login":
+        # Pydantic's default `input` field can echo a malformed password value.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [
+                    {key: error[key] for key in ("type", "loc", "msg") if key in error}
+                    for error in exc.errors()
+                ]
+            },
+        )
+    return await request_validation_exception_handler(request, exc)
+
 
 _CANDIDATE_SAFE_ENDPOINTS = {
     ("GET", "/api/v1/system/health"),

@@ -21,6 +21,7 @@ LEGACY_CUTOVER_ERROR_MESSAGE = (
     "legacy execution stopped during process cutover; remote outcome is unknown"
 )
 TASK_TO_RUN_TERMINAL_STATUS = {
+    "pending": "success",
     "success": "success",
     "failed": "failed",
     "retry": "failed",
@@ -390,6 +391,12 @@ class TaskRepository:
             raise ValueError("lock_token must not be empty")
         validate_transition(expected_task_status, task_status)
         expected_run_status = TASK_TO_RUN_TERMINAL_STATUS.get(task_status)
+        if task_status == "pending" and (
+            expected_task_status != "running" or not next_attempt_at
+            or not metrics or metrics.get("continuation") is not True
+            or consume_retry_budget
+        ):
+            raise ValueError("continuation requires an owned running task and a future schedule")
         if expected_run_status != run_status or run_status not in TERMINAL_TASK_RUN_STATUSES:
             raise ValueError(
                 f"task status {task_status!r} requires run status {expected_run_status!r}"
@@ -875,7 +882,7 @@ class TaskRepository:
             "status": target_status,
             "last_error_code": error_code,
             "last_error_message": error_message,
-            "next_attempt_at": next_attempt_at if target_status == "retry" else None,
+            "next_attempt_at": next_attempt_at if target_status in {"pending", "retry"} else None,
             "completed_at": (
                 occurred_at if target_status in TERMINAL_TASK_STATUSES else None
             ),

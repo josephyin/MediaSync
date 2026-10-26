@@ -84,6 +84,7 @@ export function scheduleLabel(value: string) {
 export const taskTypeLabels: Record<string, string> = {
   scan: '订阅扫描',
   transfer: '文件转存',
+  download: '本地下载',
 }
 
 export const triggerLabels: Record<string, string> = {

@@ -97,6 +97,11 @@ def enqueue_transfer_retry(db: Session, file: CloudFile) -> Task:
             payload_version=1,
             payload={},
             idempotency_key=f"transfer-retry:{file.id}:{predecessor_id}",
+            provider_operation_id=predecessor.provider_operation_id if predecessor else None,
+            provider_operation_status=predecessor.provider_operation_status
+            if predecessor
+            else None,
+            provider_write_intent_at=predecessor.provider_write_intent_at if predecessor else None,
         )
     )
     file.status = "pending"

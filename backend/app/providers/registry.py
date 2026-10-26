@@ -7,6 +7,7 @@ from app.providers.aliyundrive.provider import AliyunDriveProvider
 from app.providers.baidu.provider import BaiduPrivateProvider
 from app.providers.base import CloudDriveProvider
 from app.providers.pan123.provider import Pan123PrivateProvider
+from app.providers.pikpak.provider import PikPakProvider
 from app.providers.quark.provider import QuarkPrivateProvider
 
 ProviderFactory = Callable[[str, str | None], CloudDriveProvider]
@@ -50,7 +51,14 @@ def _baidu_factory(cookie: str, drive_id: str | None = None) -> CloudDriveProvid
     return BaiduPrivateProvider(cookie=cookie)
 
 
+def _pikpak_factory(refresh_token: str, drive_id: str | None = None) -> CloudDriveProvider:
+    if drive_id not in (None, "root", "/"):
+        raise ProviderError("PikPak currently exposes only its default drive")
+    return PikPakProvider(refresh_token)
+
+
 PROVIDERS: dict[str, ProviderFactory] = {
+    "pikpak": _pikpak_factory,
     "aliyundrive": _aliyundrive_factory,
     "quark": _quark_factory,
     "pan123": _pan123_factory,
@@ -123,6 +131,20 @@ def list_provider_types() -> list[dict[str, object]]:
             "enabled": True,
             "status": "experimental",
             "mode": "hybrid_api",
+            "capabilities": [
+                "account_verify",
+                "share_browse",
+                "folder_browse",
+                "folder_create",
+                "share_save",
+            ],
+        },
+        {
+            "id": "pikpak",
+            "name": "PikPak",
+            "enabled": True,
+            "status": "experimental",
+            "mode": "private_api",
             "capabilities": [
                 "account_verify",
                 "share_browse",

@@ -271,3 +271,25 @@ def test_active_transfer_is_returned_without_rewriting_file_state(
         assert returned.id == active.id
         assert file.status == "failed"
         assert file.last_error == "previous failure"
+
+
+def test_transfer_retry_preserves_remote_operation(sessions):
+    with sessions() as session, session.begin():
+        subscription, file = seed_subscription_and_file(session)
+        predecessor = Task(
+            subscription_id=subscription.id,
+            file_id=file.id,
+            type="transfer",
+            trigger_type="manual",
+            status="failed",
+            provider_operation_id="operation-1",
+            provider_operation_status="pending",
+            provider_write_intent_at=NOW,
+        )
+        session.add(predecessor)
+        session.flush()
+        successor = enqueue_transfer_retry(session, file)
+        assert successor.id != predecessor.id
+        assert successor.provider_operation_id == "operation-1"
+        assert successor.provider_operation_status == "pending"
+        assert successor.provider_write_intent_at == NOW

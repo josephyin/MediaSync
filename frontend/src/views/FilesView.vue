@@ -19,6 +19,86 @@ const retryingId = ref<number | null>(null)
 const bulkRetrying = ref(false)
 const selectedFile = ref<CloudFile | null>(null)
 const detailVisible = ref(false)
+const selection = ref<CloudFile[]>([])
+const downloadFiles = ref<{id: number}[]>([])
+const selectingAll = ref(false)
+const fileTable = ref<{ clearSelection: () => void }>()
+async function selectAllDownloadable() {
+  selectingAll.value = true
+  try {
+    const params = filteredParams(status.value)
+    const result = await api<{file_ids: number[]; count: number}>(`/downloads/selection?${params}`)
+    if (!result.count) { ElMessage.info('当前筛选范围没有可下载的已转存 PikPak 文件'); return }
+    await openDownload(result.file_ids.map(id => ({id})))
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '跨页选择失败') }
+  finally { selectingAll.value = false }
+}
+const downloadVisible = ref(false)
+const downloadDirectory = ref('')
+const downloadRoot = ref('')
+const downloadAvailable = ref(false)
+const downloading = ref(false)
+const locationVisible = ref(false)
+const locationPath = ref('')
+const locationParent = ref('/')
+const locationEntries = ref<{ name: string; path: string }[]>([])
+const locationBusy = ref(false)
+const locationTruncated = ref(false)
+async function browseLocation(path: string) {
+  locationBusy.value = true
+  try {
+    const result = await api<{ path: string; parent: string; directories: {name: string; path: string}[]; truncated: boolean }>(`/downloads/directories?path=${encodeURIComponent(path)}`)
+    locationPath.value = result.path
+    locationParent.value = result.parent
+    locationEntries.value = result.directories
+    locationTruncated.value = result.truncated
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '目录加载失败') }
+  finally { locationBusy.value = false }
+}
+function openLocationRow(row: {path: string}) { void browseLocation(row.path) }
+async function chooseLocation() {
+  locationPath.value = downloadAvailable.value ? downloadRoot.value : '/'
+  locationVisible.value = true
+  await browseLocation(locationPath.value)
+}
+async function saveLocation() {
+  locationBusy.value = true
+  try {
+    const result = await api<{ root: string; available: boolean }>('/downloads/config', {
+      method: 'PUT', body: JSON.stringify({root: locationPath.value}),
+    })
+    downloadRoot.value = result.root
+    downloadAvailable.value = result.available
+    locationVisible.value = false
+    ElMessage.success('下载位置已保存，无需重启')
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '保存失败') }
+  finally { locationBusy.value = false }
+}
+function downloadable(file: CloudFile) {
+  return file.status === 'saved' && file.item_type === 'file' && !!file.target_file_id
+    && subscriptions.value.find(s => s.id === file.subscription_id)?.provider === 'pikpak'
+}
+async function openDownload(items: {id: number}[]) {
+  downloadFiles.value = items
+  try {
+    const config = await api<{ root: string; available: boolean }>('/downloads/config')
+    downloadRoot.value = config.root
+    downloadAvailable.value = config.available
+    downloadVisible.value = true
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '下载配置加载失败') }
+}
+async function submitDownload() {
+  downloading.value = true
+  try {
+    const result = await api<{ task_ids: number[] }>('/downloads', {
+      method: 'POST', body: JSON.stringify({ file_ids: downloadFiles.value.map(f => f.id), root: downloadRoot.value, directory: downloadDirectory.value }),
+    })
+    ElMessage.success(`已加入 ${result.task_ids.length} 个下载任务，请到任务中心查看进度`)
+    downloadVisible.value = false
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '下载提交失败') }
+  finally { downloading.value = false }
+}
+
 
 function subscriptionName(id: number) {
   return subscriptions.value.find((item) => item.id === id)?.name ?? `订阅 #${id}`
@@ -49,7 +129,7 @@ async function load() {
     loading.value = false
   }
 }
-function applyFilters() { page.value = 1; void load() }
+function applyFilters() { fileTable.value?.clearSelection(); selection.value = []; page.value = 1; void load() }
 function clearFilters() {
   query.value = ''
   status.value = ''
@@ -143,6 +223,8 @@ onMounted(async () => {
           <el-button type="primary" plain @click="applyFilters">查询</el-button>
         </div>
         <div class="toolbar-actions">
+          <el-button :loading="selectingAll" @click="selectAllDownloadable">跨页全选下载</el-button>
+          <el-button :disabled="!selection.length" @click="openDownload(selection)">下载选中（{{ selection.length }}）</el-button>
           <el-button v-if="!status || status === 'failed'" type="primary" :loading="bulkRetrying" @click="retryFailed">
             批量重试失败文件
           </el-button>
@@ -151,7 +233,8 @@ onMounted(async () => {
       </div>
 
       <div class="table-wrap">
-        <el-table v-loading="loading" :data="files" empty-text=" ">
+        <el-table ref="fileTable" row-key="id" v-loading="loading" :data="files" empty-text=" " @selection-change="selection = $event">
+          <el-table-column type="selection" :reserve-selection="true" width="45" :selectable="downloadable" />
           <el-table-column label="文件信息" min-width="320">
             <template #default="scope">
               <div class="file-cell">
@@ -171,6 +254,7 @@ onMounted(async () => {
             <template #default="scope">
               <div class="result-cell">
                 <div class="result-cell__header">
+                  <el-button v-if="downloadable(scope.row)" link type="primary" @click="openDownload([scope.row])">下载到本地</el-button>
                   <el-tag :type="statusType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
                   <el-button
                     v-if="scope.row.status === 'failed'"
@@ -267,6 +351,42 @@ onMounted(async () => {
         </el-button>
       </template>
     </el-drawer>
+    <el-dialog v-model="downloadVisible" title="下载到本地 / 已挂载的 NAS" width="min(560px, 92vw)">
+      <p>已选 {{ downloadFiles.length }} 个文件（包含其他页面），保留原目录结构。</p>
+      <p>下载位置：<code>{{ downloadRoot }}</code></p>
+      <el-button @click="chooseLocation">选择下载目录</el-button>
+      <p class="muted">浏览的是运行 MediaSync 的机器，支持已挂载的 NAS 目录。</p>
+      <el-alert v-if="!downloadAvailable" type="warning" :closable="false" title="目录尚不存在，请选择其他目录，或先在服务器上挂载 NAS。" />
+      <el-form label-position="top">
+        <el-form-item label="根目录内的子目录（可留空）">
+          <el-input v-model="downloadDirectory" placeholder="例如：电影 / 本次下载" />
+        </el-form-item>
+      </el-form>
+      <p class="muted">不覆盖已有文件。中断保留进度，重试可断点继续；内容校验失败时重新下载。</p>
+      <template #footer>
+        <el-button @click="downloadVisible = false">取消</el-button>
+        <el-button type="primary" :loading="downloading" :disabled="!downloadAvailable" @click="submitDownload">加入下载队列</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="locationVisible" title="选择下载目录" width="min(620px, 94vw)" append-to-body>
+      <p>选择现有文件夹作为默认下载位置。Docker 中只能看到已映射的目录。</p>
+      <el-input v-model="locationPath" placeholder="输入绝对路径，例如 /Volumes/NAS/Media 或 /downloads" @keyup.enter="browseLocation(locationPath)">
+        <template #append><el-button :disabled="locationBusy" @click="browseLocation(locationPath)">打开</el-button></template>
+      </el-input>
+      <el-button style="margin-top: 12px" :disabled="locationBusy || locationPath === locationParent" @click="browseLocation(locationParent)">上一级</el-button>
+      <div v-loading="locationBusy" style="max-height: 320px; overflow: auto; margin-top: 12px">
+        <el-table :data="locationEntries" empty-text="此目录没有可浏览的子目录" @row-dblclick="openLocationRow">
+          <el-table-column label="文件夹">
+            <template #default="scope"><el-button link type="primary" @click="browseLocation(scope.row.path)">{{ scope.row.name }}</el-button></template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <p v-if="locationTruncated">仅显示前 1,000 个目录，也可在上方直接输入路径。</p>
+      <template #footer>
+        <el-button @click="locationVisible = false">取消</el-button>
+        <el-button type="primary" :loading="locationBusy" @click="saveLocation">使用此目录</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 

@@ -6,6 +6,7 @@ ALLOWED_TASK_TRANSITIONS: Mapping[str, Set[str]] = {
     "pending": frozenset({"running", "cancelled"}),
     "running": frozenset(
         {
+            "pending",
             "success",
             "failed",
             "retry",

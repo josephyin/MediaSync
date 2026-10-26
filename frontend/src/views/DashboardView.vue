@@ -10,6 +10,7 @@ interface RecentTask { id: number; type: string; status: string; message: string
 interface DashboardSummary {
   subscriptions: number; active_subscriptions: number; pending_files: number; saved_files: number
   saved_today: number; failed_tasks: number; running_tasks: number
+  current_issues: number; failed_files: number; scan_issues: number; download_issues: number; waiting_credentials: number
   last_scanned_at: string | null; last_full_scanned_at: string | null; next_scan_at: string | null
   folder_checkpoints: number
   request_guard: { interval_seconds: number; jitter_seconds: number; max_retries: number; schedule_jitter_seconds: number; folder_scan_batch_size: number; full_scan_interval_hours: number }
@@ -20,10 +21,11 @@ const summary = reactive<DashboardSummary>({
   subscriptions: 0, active_subscriptions: 0, pending_files: 0, saved_files: 0,
   saved_today: 0, failed_tasks: 0, running_tasks: 0, last_scanned_at: null, last_full_scanned_at: null, next_scan_at: null,
   folder_checkpoints: 0,
+  current_issues: 0, failed_files: 0, scan_issues: 0, download_issues: 0, waiting_credentials: 0,
   request_guard: { interval_seconds: 0, jitter_seconds: 0, max_retries: 0, schedule_jitter_seconds: 0, folder_scan_batch_size: 0, full_scan_interval_hours: 0 }, recent_tasks: [],
 })
 const loading = ref(false)
-const healthy = computed(() => summary.failed_tasks === 0)
+const healthy = computed(() => summary.current_issues === 0)
 let timer: number | undefined
 
 async function load(showError = false) {
@@ -53,7 +55,7 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
         </div>
       </div>
       <div class="hero-state">
-        <div class="health-pill" :class="{ warning: !healthy }"><i />{{ healthy ? '服务运行正常' : `${summary.failed_tasks} 个任务需要处理` }}</div>
+        <div class="health-pill" :class="{ warning: !healthy }"><i />{{ healthy ? '暂无待处理异常' : `${summary.current_issues} 项问题需要处理` }}</div>
         <small>数据每 15 秒自动刷新</small>
       </div>
     </div>
@@ -72,8 +74,11 @@ onUnmounted(() => { if (timer) window.clearInterval(timer) })
         <strong>{{ summary.saved_files }}</strong><em>今日新增 {{ summary.saved_today }}</em>
       </el-card>
       <el-card shadow="never" class="stat-card">
-        <div class="stat-head"><span>失败任务</span><i class="stat-icon red"><AppIcon name="tasks" :size="18" /></i></div>
-        <strong :class="{ danger: summary.failed_tasks }">{{ summary.failed_tasks }}</strong><em>{{ summary.failed_tasks ? '请尽快查看任务日志' : '暂无需要处理的异常' }}</em>
+        <div class="stat-head"><span>待处理问题</span><i class="stat-icon red"><AppIcon name="tasks" :size="18" /></i></div>
+        <el-tooltip :content="`失败文件 ${summary.failed_files} · 扫描失败 ${summary.scan_issues} · 下载失败 ${summary.download_issues} · 等待凭证 ${summary.waiting_credentials}`">
+          <strong :class="{ danger: summary.current_issues }">{{ summary.current_issues }}</strong>
+        </el-tooltip>
+        <em>历史失败 {{ summary.failed_tasks }} 次，保留执行记录</em>
       </el-card>
     </div>
 
