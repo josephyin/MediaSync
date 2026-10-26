@@ -136,7 +136,8 @@ async def test_successful_handler_finishes_task_and_run(
     assert runs[0].metrics == {"files": 1}
 
 
-async def test_cancel_at_download_slice_boundary_preserves_terminal_run(sessions):
+@pytest.mark.parametrize("outcome_status", ["deferred", "failed", "waiting_credential"])
+async def test_cancel_at_download_slice_boundary_preserves_terminal_run(sessions, outcome_status):
     task_id = enqueue(sessions, task_type="download")
     handlers = TaskHandlerRegistry()
 
@@ -145,7 +146,11 @@ async def test_cancel_at_download_slice_boundary_preserves_terminal_run(sessions
             TaskRepository(session).transition(
                 task_id, expected_status="running", target_status="cancel_requested"
             )
-        return TaskOutcome(status="deferred", metrics={"continuation": True})
+        return TaskOutcome(
+            status=outcome_status,
+            metrics={"continuation": True},
+            blocked_reason="credential expired" if outcome_status == "waiting_credential" else None,
+        )
 
     handlers.register("download", 1, handler)
     result = await runtime(sessions, handlers).run_once()

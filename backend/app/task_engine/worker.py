@@ -112,9 +112,7 @@ class WorkerRuntime:
         self._update_gate = update_gate or build_update_execution_gate()
 
     async def run_once(self) -> WorkerCycleResult:
-        claimed, recovered_count, gated = await asyncio.to_thread(
-            self._recover_and_claim
-        )
+        claimed, recovered_count, gated = await asyncio.to_thread(self._recover_and_claim)
         if gated:
             return WorkerCycleResult(
                 status="paused",
@@ -350,8 +348,12 @@ class WorkerRuntime:
                     self._worker_id,
                 )
             expected_status = task.status
-            if expected_status == "cancel_requested" and outcome.status == "deferred":
-                outcome = TaskOutcome(status="cancelled", summary="下载已取消，进度已保留")
+            if (
+                expected_status == "cancel_requested"
+                and task.type == "download"
+                and outcome.status not in {"success", "cancelled"}
+            ):
+                outcome = TaskOutcome(status="cancelled", summary="下载已取消")
             if expected_status == "cancel_requested" and outcome.status not in {
                 "success",
                 "cancelled",
@@ -375,9 +377,7 @@ class WorkerRuntime:
                 if next_retry_count > task.max_retries:
                     task_status = "failed"
                 else:
-                    retry_after = outcome.retry_after or self._backoff.delay_for(
-                        task.retry_count
-                    )
+                    retry_after = outcome.retry_after or self._backoff.delay_for(task.retry_count)
                     next_attempt_at = now + self._backoff.bounded(retry_after)
                 run_status = "failed"
             elif outcome.status == "waiting_credential":
